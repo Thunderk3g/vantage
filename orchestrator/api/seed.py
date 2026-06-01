@@ -12,6 +12,7 @@ from datetime import date, datetime, timedelta
 from typing import Optional
 
 from . import db
+from . import store
 
 # ---- "Today" pinned (data.js: new Date("2026-06-01T09:00:00")) ----
 # We only need the calendar date for ISO output and day-diff math.
@@ -328,7 +329,12 @@ def find_finding(finding_id: str) -> Optional[dict]:
 
 
 def update_finding_status(finding_id: str, status: str, actor: str, validated_at: str) -> Optional[dict]:
-    """Mutate the underlying finding so subsequent reads reflect it. Returns a copy."""
+    """Mutate the underlying finding so subsequent reads reflect it. Returns a copy.
+
+    Write-through to the persistence overlay (``store``): DB-backed when a
+    Postgres DB is configured (so the mutation survives an API restart), and a
+    silent no-op otherwise — mirroring the audit fallback pattern above.
+    """
     f = find_finding(finding_id)
     if f is None:
         return None
@@ -336,18 +342,30 @@ def update_finding_status(finding_id: str, status: str, actor: str, validated_at
     f["isClosed"] = status in ("closed", "risk_accepted")
     f["humanValidatedBy"] = actor
     f["humanValidatedAt"] = validated_at
+    store.save_finding_state(finding_id, status, actor, validated_at)
     return dict(f)
 
 
-def _next_scan_id() -> str:
-    """Next SCAN-#### id (4-digit zero-padded) after the current max."""
+def _max_id_num(rows) -> int:
+    """Largest numeric suffix across rows whose ids look like ``PREFIX-####``."""
     mx = 0
-    for s in _SCANS:
+    for row in rows:
         try:
-            n = int(str(s["id"]).split("-", 1)[1])
-        except (IndexError, ValueError):
+            n = int(str(row["id"]).split("-", 1)[1])
+        except (IndexError, ValueError, KeyError):
             continue
         mx = max(mx, n)
+    return mx
+
+
+def _next_scan_id() -> str:
+    """Next SCAN-#### id (4-digit zero-padded) after the current max.
+
+    Considers BOTH the in-memory seed scans AND any persisted scans from the
+    overlay (``store.load_scans()``), so a restart never reuses an id that was
+    already persisted. Empty/no-op when no DB is configured.
+    """
+    mx = max(_max_id_num(_SCANS), _max_id_num(store.load_scans()))
     return f"SCAN-{mx + 1:04d}"
 
 
@@ -366,6 +384,7 @@ def add_scan(asset: dict, pipeline: str, mode: str, auth_context: Optional[str],
         "by": by,
     }
     _SCANS.append(scan)
+    store.save_scan(scan)
     return dict(scan)
 
 
@@ -387,14 +406,13 @@ def tier_for_duration(duration_months: int) -> str:
 
 
 def _next_exception_id() -> str:
-    """Next EXC-### id (3-digit zero-padded) after the current max."""
-    mx = 0
-    for e in _EXCEPTIONS:
-        try:
-            n = int(str(e["id"]).split("-", 1)[1])
-        except (IndexError, ValueError):
-            continue
-        mx = max(mx, n)
+    """Next EXC-### id (3-digit zero-padded) after the current max.
+
+    Considers BOTH the in-memory seed exceptions AND any persisted exceptions
+    from the overlay (``store.load_exceptions()``), so a restart never reuses a
+    persisted id. Empty/no-op when no DB is configured.
+    """
+    mx = max(_max_id_num(_EXCEPTIONS), _max_id_num(store.load_exceptions()))
     return f"EXC-{mx + 1:03d}"
 
 
@@ -416,12 +434,51 @@ def add_exception(finding: dict, requested_by: str, duration_months: int, docume
         "reason": documented_risk,
     }
     _EXCEPTIONS.append(exc)
+    store.save_exception(exc)
     return dict(exc), tier
 
 
+def _merge_by_id(seed_rows: list[dict], persisted_rows: list[dict]) -> list[dict]:
+    """Merge seed + persisted rows de-duped by ``id``, persisted version winning.
+
+    Order is stable: seed rows first (in their existing order, but with their
+    content overridden by any persisted row of the same id), then persisted-only
+    rows appended in their load order.
+    """
+    by_id = {r["id"]: dict(r) for r in persisted_rows}
+    out: list[dict] = []
+    seen: set = set()
+    for r in seed_rows:
+        rid = r["id"]
+        seen.add(rid)
+        out.append(dict(by_id.get(rid, r)))
+    for r in persisted_rows:
+        if r["id"] not in seen:
+            out.append(dict(r))
+    return out
+
+
 def findings():
-    """Return a fresh shallow copy of the derived findings list."""
-    return [dict(f) for f in _FINDINGS]
+    """Return a fresh shallow copy of the derived findings list.
+
+    Overlay: persisted finding state (``store.load_finding_state()``) is applied
+    on top of the seed defaults — DB-backed when available, empty/no-op fallback
+    otherwise. Persisted state WINS (it represents a later human action): it
+    overrides ``status``, recomputes ``isClosed`` and sets the human-validation
+    fields. Mirrors the audit DB-backed/in-memory pattern above.
+    """
+    state = store.load_finding_state()
+    out = []
+    for f in _FINDINGS:
+        f = dict(f)
+        rec = state.get(f["id"]) if state else None
+        if rec is not None:
+            f["status"] = rec["status"]
+            f["isClosed"] = rec["status"] in ("closed", "risk_accepted")
+            f["humanValidatedBy"] = rec.get("humanValidatedBy")
+            f["humanValidatedAt"] = rec.get("humanValidatedAt")
+        out.append(f)
+    return out
 
 
 def assets():
@@ -429,11 +486,22 @@ def assets():
 
 
 def scans():
-    return [dict(s) for s in _SCANS]
+    """Seed scans merged with the persistence overlay (``store.load_scans()``).
+
+    De-duplicated by ``id`` with the persisted version winning (a persisted
+    update to a seed scan overrides; brand-new persisted scans are appended).
+    DB-backed when available; in-memory seed-only fallback otherwise.
+    """
+    return _merge_by_id(_SCANS, store.load_scans())
 
 
 def exceptions():
-    return [dict(e) for e in _EXCEPTIONS]
+    """Seed exceptions merged with the overlay (``store.load_exceptions()``).
+
+    Same merge-by-``id`` as ``scans()``: persisted wins, new persisted rows
+    appended. DB-backed when available; in-memory seed-only fallback otherwise.
+    """
+    return _merge_by_id(_EXCEPTIONS, store.load_exceptions())
 
 
 def trend():

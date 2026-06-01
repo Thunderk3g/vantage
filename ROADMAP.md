@@ -85,7 +85,12 @@ Keep it honest: check a box only when the exit criteria are met and verified.
 - [x] Start-a-scan posts to the scope gate (approved inventory only)
 - [x] Audit trail persists to the hash-chained Postgres `audit_log` (DB-backed
       via `DATABASE_URL`, with in-memory fallback; verified in the Docker stack)
-- [ ] Finding/scan/exception *state* persists to Postgres (still in-memory store)
+- [x] Finding/scan/exception *state* persists to Postgres — **overlay model**
+      (`api/store.py` + `console_*` tables): status changes + API-created scans/
+      exceptions survive a restart when `DATABASE_URL` is set; seed catalog stays
+      the base, in-memory no-op fallback otherwise. Tested both seams (store↔PG in
+      CI's schema job; seed↔store overlay in the python job) + a verified
+      restart-survival e2e against real Postgres.
 - [ ] FP confirm/clear workflow + risk-acceptance via approved exception
 - [x] Reports screen triggers real export — `POST /api/reports` (xlsx/docx/
       dual-password PDF) + `GET /api/reports/{id}/{fmt}` download, wired to the

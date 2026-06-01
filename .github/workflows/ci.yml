@@ -30,7 +30,7 @@ jobs:
             shared.py workflows.py activities.py worker.py \
             adapters/base.py adapters/nmap_adapter.py adapters/nessus_adapter.py \
             adapters/burp_adapter.py adapters/nikto_adapter.py \
-            api/__init__.py api/seed.py api/main.py api/db.py api/auth.py \
+            api/__init__.py api/seed.py api/main.py api/db.py api/auth.py api/store.py \
             triage/__init__.py triage/maps.py triage/engine.py \
             reporting/__init__.py reporting/export.py \
             normalization.py pipeline.py
@@ -49,6 +49,9 @@ jobs:
       - name: Normalization + triage wiring test (stdlib only)
         working-directory: orchestrator
         run: python test_normalization.py
+      - name: Seed persistence overlay test (in-memory fallback; injected store)
+        working-directory: orchestrator
+        run: python api/test_seed_overlay.py
       - name: End-to-end pipeline test (fixtures -> adapters -> normalize -> triage)
         working-directory: orchestrator
         run: python test_pipeline_e2e.py
@@ -125,6 +128,17 @@ jobs:
           END $$;
           SELECT 'schema smoke tests passed' AS result;
           SQL
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Console-state store round-trips against real Postgres
+        env:
+          # The store test uses DATABASE_URL when set (schema already applied
+          # above) instead of spinning its own throwaway container.
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+        run: |
+          pip install "psycopg[binary]>=3.2"
+          python orchestrator/api/test_store_pg.py
 
   # ------------------------------------------------------------------
   # Docs: the architecture generator must run and produce a valid docx.

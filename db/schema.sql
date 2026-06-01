@@ -470,4 +470,48 @@ CREATE INDEX idx_auth_sessions_identity ON auth_sessions (identity_id);
 CREATE INDEX idx_auth_sessions_active   ON auth_sessions (expires_at)
     WHERE revoked_at IS NULL;
 
+
+-- =====================================================================
+-- Console state (overlay persistence) — orchestrator/api/store.py
+-- These tables are CONSOLE-FACING state, keyed by the API's own STRING
+-- ids (e.g. 'VLN-2087', 'SCAN-0099', 'EXC-047') — deliberately DISTINCT
+-- from the normalized scanner tables above (findings/scans/exceptions,
+-- which are uuid-keyed and populated by the real pipeline). store.py
+-- overlays these mutations on the seed catalog so they SURVIVE AN API
+-- RESTART when DATABASE_URL is configured: a finding's status change, an
+-- API-created scan, and an API-created exception. No foreign keys: the
+-- referenced finding/scan/exception may live only in the seed catalog,
+-- never in the normalized tables, so there is nothing to reference. The
+-- whole scan/exception payload is stored as jsonb; finding state is a
+-- thin row. Create order is independent (no FKs); all inside this txn.
+-- =====================================================================
+
+-- 14. CONSOLE_FINDING_STATE — mutable status overlay for one finding,
+--     keyed by the API string id. UPSERT-on-finding_id from store.py
+--     (status / validated_by / validated_at, with updated_at = now()).
+CREATE TABLE console_finding_state (
+    finding_id   text PRIMARY KEY,             -- API string id, e.g. 'VLN-2087'
+    status       text NOT NULL,                -- console status (free-form wire value)
+    validated_by text,                         -- human who validated (display string)
+    validated_at date,                         -- date of human validation (nullable)
+    updated_at   timestamptz NOT NULL DEFAULT now()
+);
+
+-- 15. CONSOLE_SCANS — an API-created scan, whole dict persisted as jsonb,
+--     keyed by its API string id ('SCAN-...'). INSERT ... ON CONFLICT
+--     (scan_id) DO UPDATE from store.py; read back ORDER BY created_at.
+CREATE TABLE console_scans (
+    scan_id    text PRIMARY KEY,               -- API string id, e.g. 'SCAN-0099'
+    data       jsonb NOT NULL,                 -- full scan payload as created by the console
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- 16. CONSOLE_EXCEPTIONS — an API-created exception, whole dict persisted
+--     as jsonb, keyed by its API string id ('EXC-...'). Same upsert shape.
+CREATE TABLE console_exceptions (
+    exception_id text PRIMARY KEY,             -- API string id, e.g. 'EXC-047'
+    data         jsonb NOT NULL,               -- full exception payload from the console
+    created_at   timestamptz NOT NULL DEFAULT now()
+);
+
 COMMIT;
