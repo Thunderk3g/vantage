@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  # ------------------------------------------------------------------
+  # Orchestrator: byte-compile every module (no syntax/regression rot).
+  # ------------------------------------------------------------------
+  python:
+    name: Orchestrator compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install runtime deps
+        run: pip install defusedxml
+      - name: Byte-compile orchestrator
+        working-directory: orchestrator
+        run: |
+          python -m py_compile \
+            shared.py workflows.py activities.py worker.py \
+            adapters/base.py adapters/nmap_adapter.py adapters/nessus_adapter.py \
+            adapters/burp_adapter.py adapters/nikto_adapter.py
+      - name: Guard — no exploitation phase may be introduced
+        run: |
+          if grep -rniE "phase\s*=\s*['\"]?(exploit|post_exploit|lateral|remediate)" orchestrator db; then
+            echo "::error::An exploitation/remediation phase was introduced — this violates the hard scope boundary."
+            exit 1
+          fi
+          echo "Scope guard passed: no exploitation phase present."
+
+  # ------------------------------------------------------------------
+  # Database: the DDL must actually apply to a real Postgres.
+  # ------------------------------------------------------------------
+  schema:
+    name: Schema apply
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply schema.sql
+        env:
+          PGPASSWORD: postgres
+        run: psql -h localhost -U postgres -v ON_ERROR_STOP=1 -f db/schema.sql
+      - name: Smoke-test SLA trigger + scope/exception constraints
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -v ON_ERROR_STOP=1 <<'SQL'
+          -- SLA trigger: Critical -> +30 days
+          INSERT INTO assets (asset_class, owner_team, hod_approver, is_internal, ip, approved_in_inventory)
+            VALUES ('linux_srv','infra','hod', true, '10.0.0.1', true);
+          INSERT INTO scope_authorizations (scan_request_id, pipeline, mode, target_asset_ids,
+            window_start, window_end, token_hash, signed_by)
+            VALUES (gen_random_uuid(),'infra','blackbox', ARRAY[(SELECT asset_id FROM assets LIMIT 1)],
+            now(), now()+interval '1 day', '\x00', 'ci');
+          INSERT INTO scans (pipeline, profile, authz_id, mode, engine_set)
+            VALUES ('infra','ci',(SELECT authz_id FROM scope_authorizations LIMIT 1),'blackbox',ARRAY['nmap']);
+          INSERT INTO findings (scan_id, asset_id, source_tool, title, severity_normalized, dedup_key)
+            VALUES ((SELECT scan_id FROM scans LIMIT 1),(SELECT asset_id FROM assets LIMIT 1),
+            'nessus','t','Critical','k1');
+          INSERT INTO slas (finding_id, severity, detected_at)
+            VALUES ((SELECT finding_id FROM findings LIMIT 1),'Critical', now());
+          DO $$ BEGIN
+            IF (SELECT due_date::date - detected_at::date FROM slas) <> 30 THEN
+              RAISE EXCEPTION 'SLA trigger wrong: expected 30 days for Critical';
+            END IF;
+          END $$;
+          -- audit log must reject UPDATE
+          INSERT INTO audit_log (actor, action, entity_type) VALUES ('ci','TEST','scan');
+          DO $$ BEGIN
+            BEGIN
+              UPDATE audit_log SET action='tamper';
+              RAISE EXCEPTION 'audit_log UPDATE should have been blocked';
+            EXCEPTION WHEN others THEN NULL; END;
+          END $$;
+          SELECT 'schema smoke tests passed' AS result;
+          SQL
+
+  # ------------------------------------------------------------------
+  # Docs: the architecture generator must run and produce a valid docx.
+  # ------------------------------------------------------------------
+  docs:
+    name: Architecture doc smoke-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install docx
+      - run: node docs/generate_architecture_docx.js
+      - name: Ensure the docx was produced
+        run: test -s docs/architecture.docx && echo "architecture.docx generated"

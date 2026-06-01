@@ -1,0 +1,41 @@
+name: "🔌 Engine adapter"
+description: Add or change a scanner engine adapter (Nmap, Nessus, Burp, Nikto, ZAP, Nuclei, Trivy).
+title: "[adapter] "
+labels: ["adapter"]
+body:
+  - type: input
+    id: engine
+    attributes:
+      label: Engine
+      placeholder: "e.g. OWASP ZAP"
+    validations:
+      required: true
+  - type: dropdown
+    id: interface
+    attributes:
+      label: Interface
+      options: ["CLI", "REST API", "Other"]
+    validations:
+      required: true
+  - type: textarea
+    id: parsing
+    attributes:
+      label: Native format → CanonicalFinding
+      description: What raw format does it emit, and how does parse() map it (incl. severity band, OWASP/SANS/CIS tags)?
+    validations:
+      required: true
+  - type: checkboxes
+    id: contract
+    attributes:
+      label: Adapter contract
+      options:
+        - label: Implements preflight/launch/wait/fetch_raw/parse.
+          required: true
+        - label: preflight re-verifies scope and intersects targets with the token allowlist (fail closed).
+          required: true
+        - label: Credentials are leased from the vault at launch, never from config.
+          required: true
+        - label: XML output (if any) is parsed with defusedxml.
+          required: true
+        - label: Exposes no exploit/intrusive capability (e.g. Nmap NSE limited to safe categories).
+          required: true

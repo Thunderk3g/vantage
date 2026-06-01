@@ -1,0 +1,47 @@
+name: "📐 Scope item"
+description: Propose or track a unit of application scope (maps to ROADMAP.md).
+title: "[scope] "
+labels: ["scope"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for any change to what Vantage does. Every scope item must map
+        to a phase in `ROADMAP.md`. Exploitation, lateral movement, and
+        auto-remediation are **out of scope by definition** and will be closed.
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Roadmap phase
+      options:
+        - "Phase 0 — Foundations"
+        - "Phase 1 — Infra MVP"
+        - "Phase 2 — Web MVP"
+        - "Phase 3 — AI triage"
+        - "Phase 4 — Governance & lifecycle"
+        - "Phase 5 — OSS variant & hardening"
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome / definition of done
+      description: What is true when this is complete? State the exit criteria.
+    validations:
+      required: true
+  - type: textarea
+    id: invariants
+    attributes:
+      label: Security invariants touched
+      description: Does this affect the scope gate, phase boundary, SLA, audit log, secrets, or LLM redaction? How is each preserved?
+    validations:
+      required: true
+  - type: checkboxes
+    id: boundary
+    attributes:
+      label: Scope boundary attestation
+      options:
+        - label: This item does NOT add exploitation, lateral movement, or auto-remediation.
+          required: true
+        - label: This item keeps human validation / manual PT downstream and human-gated.
+          required: true

@@ -1,0 +1,5 @@
+# Normalize line endings: text is LF in the repo, binaries untouched.
+* text=auto eol=lf
+*.docx binary
+*.pdf binary
+*.png binary

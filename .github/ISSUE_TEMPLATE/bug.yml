@@ -1,0 +1,29 @@
+name: "🐞 Bug"
+description: Something in the orchestrator, schema, triage, or reporting is wrong.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened vs. expected
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: ["scope gate", "workflow/orchestrator", "adapter", "schema/DB", "triage/LLM", "reporting", "SLA/escalation", "other"]
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: This report contains no real credentials, asset inventory, or live scan data.
+          required: true

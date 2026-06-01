@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📐 Scope & roadmap
+    url: https://github.com/Thunderk3g/vantage/blob/main/ROADMAP.md
+    about: Application scope lives in ROADMAP.md. Read it before proposing changes.
+  - name: 🔒 Security boundary
+    url: https://github.com/Thunderk3g/vantage/blob/main/CONTRIBUTING.md
+    about: Vantage scans and reports only. No exploitation/PT in this repo.

@@ -1,0 +1,12 @@
+# Orchestrator (Phase 0/1)
+temporalio>=1.7,<2          # durable workflow engine
+defusedxml>=0.7             # hardened XML parsing for scanner output (XXE-safe)
+psycopg[binary]>=3.2        # Postgres driver
+hvac>=2.3                   # HashiCorp Vault client (or CyberArk SDK)
+pynacl>=1.5                 # Ed25519 signing of scope-authorization tokens
+
+# Reporting
+openpyxl>=3.1              # xlsx
+python-docx>=1.1          # docx
+weasyprint>=62            # html -> pdf
+pikepdf>=9                 # AES-256 dual-password PDF (user + owner password)

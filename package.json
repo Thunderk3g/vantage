@@ -1,0 +1,12 @@
+{
+  "name": "vantage",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI-augmented scan-and-report vulnerability scanner (architecture & reference skeleton).",
+  "scripts": {
+    "build:docs": "node docs/generate_architecture_docx.js"
+  },
+  "dependencies": {
+    "docx": "^9.0.0"
+  }
+}

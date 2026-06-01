@@ -1,0 +1,40 @@
+# --- Secrets / environment (NEVER commit) ---
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+secrets/
+vault-token*
+*credentials*
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# --- Node ---
+node_modules/
+npm-debug.log*
+package-lock.json
+
+# --- Scan artifacts / raw engine output (sensitive recon — keep out of git) ---
+artifacts/
+raw/
+*.nessus
+scan-output/
+reports/*.xlsx
+reports/*.docx
+reports/*.pdf
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
