@@ -1,0 +1,39 @@
+<?xml version="1.0" ?>
+<!DOCTYPE niktoscan>
+<niktoscan>
+  <scandetails targetip="10.0.0.7"
+               targethostname="app.internal"
+               targetport="443"
+               targetbanner="nginx/1.18.0"
+               starttime="2026-05-30 02:14:11"
+               sitename="https://app.internal:443/"
+               siteip="https://10.0.0.7:443/"
+               hostheader="app.internal"
+               errors="0"
+               checks="6400">
+    <item id="999957" osvdbid="3092" osvdblink="" method="GET">
+      <description>/admin/: This might be interesting; directory listing appears to be enabled.</description>
+      <uri>/admin/</uri>
+      <namelink>https://app.internal:443/admin/</namelink>
+      <iplink>https://10.0.0.7:443/admin/</iplink>
+    </item>
+    <item id="999103" osvdbid="3268" osvdblink="" method="GET">
+      <description>The X-Content-Type-Options header is not set. This could allow the user agent to render the content of the site in a different fashion to the MIME type.</description>
+      <uri>/</uri>
+      <namelink>https://app.internal:443/</namelink>
+      <iplink>https://10.0.0.7:443/</iplink>
+    </item>
+    <item id="999970" osvdbid="0" osvdblink="" method="GET">
+      <description>Server banner 'nginx/1.18.0' may reveal the running version.</description>
+      <uri></uri>
+      <namelink>https://app.internal:443/</namelink>
+      <iplink>https://10.0.0.7:443/</iplink>
+    </item>
+    <item id="999986" osvdbid="630" osvdblink="" method="GET">
+      <description>/robots.txt contains 3 entries which should be manually reviewed.</description>
+      <uri>/robots.txt</uri>
+      <namelink>https://app.internal:443/robots.txt</namelink>
+      <iplink>https://10.0.0.7:443/robots.txt</iplink>
+    </item>
+  </scandetails>
+</niktoscan>

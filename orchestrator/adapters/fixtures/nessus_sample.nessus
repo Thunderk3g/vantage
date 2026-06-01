@@ -1,0 +1,75 @@
+<?xml version="1.0" ?>
+<NessusClientData_v2>
+  <Policy>
+    <policyName>Synthetic VA + CIS Sample</policyName>
+  </Policy>
+  <Report name="Vantage Synthetic Scan" xmlns:cm="http://www.nessus.org/cm">
+    <ReportHost name="10.0.0.5">
+      <HostProperties>
+        <tag name="host-ip">10.0.0.5</tag>
+        <tag name="host-fqdn">web-edge-01.synthetic.test</tag>
+        <tag name="operating-system">Linux Kernel 5.x</tag>
+      </HostProperties>
+
+      <!-- CRITICAL: cvss >= 9, two CVEs -->
+      <ReportItem port="443" svc_name="www" protocol="tcp" severity="4"
+                  pluginID="12345" pluginName="OpenSSL Remote Code Execution"
+                  pluginFamily="Web Servers">
+        <description>A remote code execution flaw exists in the TLS stack of the
+        target service. A crafted handshake can corrupt memory on the server.
+        This is benign synthetic test data.</description>
+        <synopsis>The remote host is affected by a remote code execution vulnerability.</synopsis>
+        <solution>Upgrade to a fixed release.</solution>
+        <risk_factor>Critical</risk_factor>
+        <cvss3_base_score>9.8</cvss3_base_score>
+        <cvss3_vector>CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H</cvss3_vector>
+        <cvss_base_score>10.0</cvss_base_score>
+        <cve>CVE-2024-0001</cve>
+        <cve>CVE-2024-0002</cve>
+      </ReportItem>
+
+      <!-- MEDIUM: cvss in 4..7 band, single CVE -->
+      <ReportItem port="80" svc_name="www" protocol="tcp" severity="2"
+                  pluginID="22001" pluginName="Web Server Allows Directory Listing"
+                  pluginFamily="Web Servers">
+        <description>The remote web server allows directory listing, exposing
+        file names that should not be public. Synthetic sample.</description>
+        <synopsis>Directory listing is enabled on the remote web server.</synopsis>
+        <risk_factor>Medium</risk_factor>
+        <cvss3_base_score>5.3</cvss3_base_score>
+        <cvss3_vector>CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N</cvss3_vector>
+        <cve>CVE-2023-9999</cve>
+      </ReportItem>
+
+      <!-- NO CVSS, severity="1" -> LOW via _band fallback; no CVE; no description -->
+      <ReportItem port="0" svc_name="general" protocol="tcp" severity="1"
+                  pluginID="10107" pluginName="HTTP Server Banner Disclosure"
+                  pluginFamily="General">
+        <synopsis>It is possible to obtain the server banner.</synopsis>
+        <risk_factor>Low</risk_factor>
+      </ReportItem>
+    </ReportHost>
+
+    <ReportHost name="10.0.0.20">
+      <HostProperties>
+        <tag name="host-ip">10.0.0.20</tag>
+        <tag name="host-fqdn">db-audit-01.synthetic.test</tag>
+        <tag name="operating-system">Windows Server 2022</tag>
+      </HostProperties>
+
+      <!-- COMPLIANCE / CIS-style item (exercised by policy="CIS") -->
+      <ReportItem port="0" svc_name="general" protocol="tcp" severity="3"
+                  pluginID="33814" pluginName="CIS Benchmark: Ensure 'Minimum password length' is set"
+                  pluginFamily="Policy Compliance">
+        <description>This check verifies the minimum password length policy
+        against the CIS benchmark. Synthetic compliance sample.</description>
+        <cm:compliance-check-name>Ensure minimum password length is configured</cm:compliance-check-name>
+        <cm:compliance-result>FAILED</cm:compliance-result>
+        <cm:compliance-reference>CIS|5.2</cm:compliance-reference>
+        <cm:compliance-control-id>5.2</cm:compliance-control-id>
+        <cvss3_base_score>7.5</cvss3_base_score>
+        <cvss3_vector>CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N</cvss3_vector>
+      </ReportItem>
+    </ReportHost>
+  </Report>
+</NessusClientData_v2>

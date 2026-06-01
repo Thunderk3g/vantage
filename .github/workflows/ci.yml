@@ -34,6 +34,13 @@ jobs:
             triage/__init__.py triage/maps.py triage/engine.py \
             reporting/__init__.py reporting/export.py \
             normalization.py
+      - name: Adapter parser tests (real tool-output fixtures; defusedxml)
+        working-directory: orchestrator
+        run: |
+          python adapters/test_nmap_adapter.py
+          python adapters/test_nessus_adapter.py
+          python adapters/test_burp_adapter.py
+          python adapters/test_nikto_adapter.py
       - name: Triage engine unit test (stdlib only)
         run: python orchestrator/triage/test_triage.py
       - name: Normalization + triage wiring test (stdlib only)

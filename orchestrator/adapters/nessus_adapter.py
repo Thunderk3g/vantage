@@ -60,17 +60,26 @@ class NessusAdapter:
         tree = ET.parse(_local_copy(raw.uri))
         findings: list[CanonicalFinding] = []
         for host in tree.iterfind(".//ReportHost"):
-            addr = host.get("name", "")
+            addr = host.get("name", "") or ""
             for item in host.iterfind("ReportItem"):
+                # CVSS may be absent (e.g. compliance/info items); fall back to
+                # the Nessus 0..4 `severity` attribute inside _band.
                 cvss = item.findtext("cvss3_base_score") or item.findtext("cvss_base_score")
-                cvss_f = float(cvss) if cvss else None
+                cvss_f = _to_float(cvss)
+                # cve may appear zero, once, or many times.
+                cves = [e.text.strip() for e in item.iterfind("cve")
+                        if e.text and e.text.strip()]
+                # description may be missing entirely.
+                desc = item.findtext("description")
+                if desc is not None:
+                    desc = desc.strip() or None
                 findings.append(CanonicalFinding(
                     asset_id=_asset_id_for(addr),
                     source_tool=self.name,
                     native_id=item.get("pluginID"),
-                    title=item.get("pluginName", ""),
-                    description=item.findtext("description"),
-                    cve=[e.text for e in item.iterfind("cve") if e.text],
+                    title=item.get("pluginName", "") or "",
+                    description=desc,
+                    cve=cves,
                     cvss_base=cvss_f,
                     cvss_vector=item.findtext("cvss3_vector"),
                     severity_normalized=_band(cvss_f, item.get("severity")),
@@ -102,6 +111,100 @@ def _dedup_key(addr: str, item) -> str:
     return hashlib.sha256(sig.encode()).hexdigest()
 
 
-def _local_copy(uri: str) -> str: ...
-def _asset_id_for(addr: str) -> str: ...
-def _cis_control(item) -> str | None: ...
+def _to_float(value: str | None) -> float | None:
+    """Parse a CVSS string defensively; messy/blank scores -> None."""
+    if value is None:
+        return None
+    value = value.strip()
+    if not value:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+def _local_copy(uri: str) -> str:
+    """Resolve the raw-artifact pointer to a local filesystem path.
+
+    In production this would pull the object out of the object store to a
+    temp file. Here the artifact is already local, so the uri *is* the path.
+    """
+    return uri
+
+
+def _asset_id_for(addr: str) -> str:
+    """Deterministic asset id from a host address (IPv4/IPv6/hostname).
+
+    Same address -> same id on every run (no DB round-trip, no randomness),
+    so findings dedup/correlate across scans.
+    """
+    addr = (addr or "").strip()
+    if not addr:
+        return "AST-unknown"
+    return "AST-" + addr.replace(".", "-").replace(":", "-")
+
+
+def _cis_control(item) -> str | None:
+    """Best-effort CIS control reference from a Nessus compliance ReportItem.
+
+    Credentialed CIS-audit plugins emit `cm:`-namespaced compliance children
+    (e.g. <cm:compliance-reference>CIS|5.2</cm:compliance-reference> or
+    <cm:compliance-control-id>...). defusedxml keeps namespaced tags as
+    `{uri}local` (or bare `cm:local` when undeclared), so we match on the
+    local part of the tag rather than a fixed namespace.
+
+    Defensive by contract: VA items (and any item with no compliance data)
+    return None instead of raising.
+    """
+    if item is None:
+        return None
+
+    def _localname(tag) -> str:
+        if not isinstance(tag, str):
+            return ""
+        # Strip an `{namespace}` prefix and/or a `prefix:` prefix.
+        if "}" in tag:
+            tag = tag.rsplit("}", 1)[-1]
+        if ":" in tag:
+            tag = tag.rsplit(":", 1)[-1]
+        return tag.lower()
+
+    # 1) Direct compliance-reference / control-id children.
+    for child in list(item):
+        local = _localname(getattr(child, "tag", ""))
+        text = (child.text or "").strip() if child.text else ""
+        if not text:
+            continue
+        if "compliance" in local and "cis" in text.lower():
+            return _normalize_cis(text)
+        if "control-id" in local or local in ("compliance-control-id", "cis_control"):
+            return _normalize_cis(text)
+
+    # 2) A see_also / plugin field that references a CIS control.
+    for tagname in ("cis_control", "see_also"):
+        text = item.findtext(tagname)
+        if text and "cis" in text.lower():
+            ref = _normalize_cis(text)
+            if ref:
+                return ref
+
+    return None
+
+
+def _normalize_cis(text: str) -> str | None:
+    """Pull a `CIS-<n.n>` token out of a free-text compliance reference.
+
+    Accepts 'CIS|5.2', 'CIS 5.2', 'CIS-5.2', 'CIS Control 5.2 ...' and
+    normalizes to 'CIS-5.2'. Returns the trimmed text if no number is found
+    but the string still mentions CIS, else None.
+    """
+    import re
+    if not text:
+        return None
+    m = re.search(r"CIS[\s|:_-]*(?:control[\s:#-]*)?(\d+(?:\.\d+)*)", text, re.I)
+    if m:
+        return "CIS-" + m.group(1)
+    if "cis" in text.lower():
+        return text.strip()
+    return None

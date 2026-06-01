@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE nmaprun>
+<?xml-stylesheet href="file:///usr/bin/../share/nmap/nmap.xsl" type="text/xsl"?>
+<!-- Benign synthetic inventory sample for adapter tests. No real targets. -->
+<nmaprun scanner="nmap" args="nmap -sV -oX nmap_sample.xml 10.0.0.5"
+         start="1717200000" startstr="Sun Jun  1 00:00:00 2026"
+         version="7.94" xmloutputversion="1.05">
+  <scaninfo type="syn" protocol="tcp" numservices="1000"/>
+  <verbose level="0"/>
+  <debugging level="0"/>
+  <host starttime="1717200000" endtime="1717200060">
+    <status state="up" reason="echo-reply" reason_ttl="63"/>
+    <address addr="10.0.0.5" addrtype="ipv4"/>
+    <address addr="00:0C:29:1A:2B:3C" addrtype="mac" vendor="VMware"/>
+    <hostnames>
+      <hostname name="app-portal.internal.example" type="PTR"/>
+    </hostnames>
+    <ports>
+      <!-- Open SSH with full product/version info. -->
+      <port protocol="tcp" portid="22">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="ssh" product="OpenSSH" version="8.9p1 Ubuntu 3ubuntu0.6"
+                 method="probed" conf="10"/>
+      </port>
+      <!-- Closed port: MUST be skipped by the parser. -->
+      <port protocol="tcp" portid="23">
+        <state state="closed" reason="reset" reason_ttl="63"/>
+        <service name="telnet" method="table" conf="3"/>
+      </port>
+      <!-- Filtered port: MUST be skipped by the parser. -->
+      <port protocol="tcp" portid="3389">
+        <state state="filtered" reason="no-response" reason_ttl="0"/>
+        <service name="ms-wbt-server" method="table" conf="3"/>
+      </port>
+      <!-- Open HTTPS with full product/version info. -->
+      <port protocol="tcp" portid="443">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="https" product="nginx" version="1.24.0"
+                 tunnel="ssl" method="probed" conf="10"/>
+      </port>
+      <!-- Open port whose <service> lacks product/version (only name). -->
+      <port protocol="tcp" portid="8080">
+        <state state="open" reason="syn-ack" reason_ttl="63"/>
+        <service name="http-proxy" method="table" conf="3"/>
+      </port>
+    </ports>
+  </host>
+  <runstats>
+    <finished time="1717200060" timestr="Sun Jun  1 00:01:00 2026" elapsed="60.00"
+              summary="Nmap done; 1 IP address (1 host up) scanned" exit="success"/>
+    <hosts up="1" down="0" total="1"/>
+  </runstats>
+</nmaprun>

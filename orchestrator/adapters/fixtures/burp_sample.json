@@ -1,0 +1,60 @@
+{
+  "issue_events": [
+    {
+      "type": "issue_found",
+      "issue": {
+        "name": "Cross-site scripting (reflected)",
+        "type_index": 2097920,
+        "serial_number": "1001",
+        "severity": "high",
+        "confidence": "certain",
+        "description": "<p>Reflected cross-site scripting arises when input is copied into the response without sanitization. Synthetic finding against a benign demo app.</p>",
+        "origin": "https://shop.demo.internal",
+        "path": "/search",
+        "evidence": [],
+        "vulnerability_classifications": "<ul><li>CWE-79: Improper Neutralization of Input During Web Page Generation</li></ul>"
+      }
+    },
+    {
+      "type": "issue_found",
+      "issue": {
+        "name": "Cleartext submission of password",
+        "type_index": 5243392,
+        "serial_number": "1002",
+        "severity": "medium",
+        "confidence": "firm",
+        "description": "<p>The login form submits credentials over an unencrypted connection in this demo environment.</p>",
+        "origin": "https://shop.demo.internal",
+        "path": "/account/login",
+        "evidence": [],
+        "vulnerability_classifications": "<ul><li>CWE-319: Cleartext Transmission of Sensitive Information</li></ul>"
+      }
+    },
+    {
+      "type": "issue_found",
+      "issue": {
+        "name": "Cacheable HTTPS response",
+        "type_index": 8389632,
+        "serial_number": "1003",
+        "severity": "low",
+        "confidence": "tentative",
+        "description": "<p>Cacheable responses may allow sensitive content to be stored by intermediaries.</p>",
+        "origin": "https://shop.demo.internal",
+        "path": "/account/profile",
+        "evidence": [],
+        "vulnerability_classifications": "<ul><li>CWE-525: Use of Web Browser Cache Containing Sensitive Information</li></ul>"
+      }
+    },
+    {
+      "type": "issue_found",
+      "issue": {
+        "name": "Robots.txt file",
+        "type_index": 6291968,
+        "serial_number": "1004",
+        "severity": "info",
+        "confidence": "certain",
+        "origin": "https://shop.demo.internal"
+      }
+    }
+  ]
+}

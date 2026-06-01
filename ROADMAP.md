@@ -35,8 +35,10 @@ Keep it honest: check a box only when the exit criteria are met and verified.
 **Exit:** end-to-end internal black-box scan → triaged register with SLAs, human-validated.
 
 - [x] Workflow skeleton (`InfraScanWorkflow`)
-- [x] Nmap adapter (safe NSE categories only)
-- [x] Nessus adapter (VA) with hardened parsing
+- [x] Nmap adapter (safe NSE categories only) — `parse()` hardened against
+      messy XML + unit-tested against a real `nmap -oX` fixture
+- [x] Nessus adapter (VA + CIS) with hardened parsing — CVSS→band + CVE/compliance
+      extraction unit-tested against a real `.nessus` v2 fixture
 - [ ] Normalization engine (raw → `CanonicalFinding`)
 - [x] Deterministic triage engine (`orchestrator/triage/`): dedup + CVSS→severity
       + SLA + OWASP/SANS/CIS mapping tables (unit-tested)
@@ -81,8 +83,9 @@ Keep it honest: check a box only when the exit criteria are met and verified.
 **Exit:** web pipeline parity.
 
 - [x] Workflow skeleton (`WebAppScanWorkflow`)
-- [x] Burp adapter (crawl in 3 auth contexts + scan)
-- [x] Nikto adapter
+- [x] Burp adapter (crawl in 3 auth contexts + scan) — issue JSON → `CanonicalFinding`
+      parser implemented + unit-tested (severity map, auth-context tagging)
+- [x] Nikto adapter — `parse()` hardened + unit-tested against a real nikto XML fixture
 - [ ] OWASP Web / OWASP API / SANS-25 mapping tables
 - [ ] CIS config review (credentialed Nessus compliance)
 - [ ] Word + dual-password PDF export

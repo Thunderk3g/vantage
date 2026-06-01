@@ -27,6 +27,8 @@ package-lock.json
 artifacts/
 raw/
 *.nessus
+# ...except the one synthetic, benign parser-test fixture (no real targets).
+!orchestrator/adapters/fixtures/nessus_sample.nessus
 scan-output/
 reports/*.xlsx
 reports/*.docx
