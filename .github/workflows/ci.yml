@@ -83,13 +83,14 @@ jobs:
               RAISE EXCEPTION 'SLA trigger wrong: expected 30 days for Critical';
             END IF;
           END $$;
-          -- audit log must reject UPDATE
+          -- audit log must reject UPDATE (verify by post-condition, not by
+          -- catching our own assertion).
           INSERT INTO audit_log (actor, action, entity_type) VALUES ('ci','TEST','scan');
           DO $$ BEGIN
-            BEGIN
-              UPDATE audit_log SET action='tamper';
-              RAISE EXCEPTION 'audit_log UPDATE should have been blocked';
-            EXCEPTION WHEN others THEN NULL; END;
+            BEGIN UPDATE audit_log SET action='tamper'; EXCEPTION WHEN others THEN NULL; END;
+            IF EXISTS (SELECT 1 FROM audit_log WHERE action='tamper') THEN
+              RAISE EXCEPTION 'audit_log UPDATE was not blocked';
+            END IF;
           END $$;
           SELECT 'schema smoke tests passed' AS result;
           SQL
