@@ -32,9 +32,13 @@ jobs:
             adapters/burp_adapter.py adapters/nikto_adapter.py \
             api/__init__.py api/seed.py api/main.py api/db.py \
             triage/__init__.py triage/maps.py triage/engine.py \
-            reporting/__init__.py reporting/export.py
+            reporting/__init__.py reporting/export.py \
+            normalization.py
       - name: Triage engine unit test (stdlib only)
         run: python orchestrator/triage/test_triage.py
+      - name: Normalization + triage wiring test (stdlib only)
+        working-directory: orchestrator
+        run: python test_normalization.py
       - name: Reporting engine unit test
         run: |
           pip install openpyxl python-docx reportlab pikepdf

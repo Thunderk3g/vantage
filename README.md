@@ -43,9 +43,9 @@ are designed and scaffolded but not yet wired to live systems.
 |---|---|---|
 | Architecture & data model | ✅ Done | `docs/architecture.*`; reviewed end-to-end. |
 | Database schema (`db/schema.sql`) | ✅ Done | Applies on Postgres 16; SLA trigger, audit hash-chain, exception-routing CHECK all **verified** (and smoke-tested in CI + Docker). |
-| Console API (`orchestrator/api/`) | ✅ Done | FastAPI; reads **and human-gated writes** — finding status, scope-gated scans (fail-closed 403), exception requests — per `docs/api-contract.md`. **Audit trail persists to the hash-chained Postgres `audit_log`**; finding/scan state is still in-memory. |
-| Triage engine (`orchestrator/triage/`) | ✅ Done (det.) | Deterministic dedup + CVSS→severity + SLA + OWASP/SANS/CIS mapping, unit-tested. LLM layer still designed; not yet wired into the pipeline. |
-| Reporting engine (`orchestrator/reporting/`) | ✅ Done | xlsx + docx + **dual-password PDF** (reportlab→pikepdf, AES-256), unit-tested. Not yet wired to an API endpoint/screen. |
+| Console API (`orchestrator/api/`) | ✅ Done | FastAPI; reads, **human-gated writes** (status, scope-gated scans, exceptions), and **report generation/download** — per `docs/api-contract.md`. **Audit trail persists to the hash-chained Postgres `audit_log`**; finding/scan state is still in-memory. |
+| Triage engine (`orchestrator/triage/`) | ✅ Done (det.) | Deterministic dedup + CVSS→severity + SLA + OWASP/SANS/CIS mapping, unit-tested, **wired into the pipeline** via `orchestrator/normalization.py`. LLM layer still designed. |
+| Reporting (`orchestrator/reporting/` + `/api/reports`) | ✅ Done | xlsx + docx + **dual-password PDF** (reportlab→pikepdf, AES-256), unit-tested, **wired to `POST /api/reports` + the Reports screen** (generate → download). |
 | Web console — 8 screens | ✅ Done | Built from the design handoff; all screens read-wired, plus **write flows** on Finding detail (status), Start-a-scan (scope gate), and Exceptions (request). Loading/error states + offline read fallback. |
 | Docker stack (web + api + db) | ✅ Done | `docker compose up`; CI builds + boots + smoke-tests it. |
 | Orchestrator workflows (Temporal) | 🟡 Skeleton | Phase gating + hard stop before exploitation are real; activities are `NotImplementedError` stubs. |
@@ -66,14 +66,16 @@ Ordered roughly by dependency. Tracked live in **[ROADMAP.md](ROADMAP.md)**.
    Postgres `audit_log` (DB-backed with in-memory fallback). **Left:** persist the
    finding/scan/exception *state* itself via `psycopg` against the schema (still
    an in-memory store today).
-3. ✅ **Triage engine (deterministic).** *Done* (`orchestrator/triage/`) — dedup,
-   CVSS→severity, SLA, OWASP/SANS/CIS mapping, unit-tested. **Left:** wire it into
-   the pipeline activities + add the redacted **LLM** pass.
-4. ✅ **Reporting engine.** *Done* (`orchestrator/reporting/`) — xlsx/docx/
-   dual-password PDF, unit-tested. **Left:** expose `POST /api/reports` and wire
-   the Reports screen's generate flow.
+3. 🟡 **Triage.** *Deterministic engine done + wired* (`orchestrator/triage/` via
+   `orchestrator/normalization.py` into `activities.normalize_and_triage`,
+   unit-tested). **Left:** the redacted **LLM** pass, and feeding it real adapter
+   output (depends on #5).
+4. ✅ **Reporting.** *Done* — `orchestrator/reporting/` (xlsx/docx/dual-password
+   PDF) exposed via `POST /api/reports` + `GET /api/reports/{id}/{fmt}` and wired
+   to the Reports screen (generate → download).
 5. **Scanner adapter bodies.** Wire Nmap / Nessus / Burp / Nikto (and the OSS
    ZAP / Nuclei / Trivy variant) engine calls + least-privilege vault creds.
+   This produces the real findings that flow into triage (#3).
 6. **Scope gate + scheduler (engine side).** The orchestrator's own scope gate
    (Ed25519 token signing via vault) and the scan cadence (internal/public 2×/yr,
    CIS 1×/yr) — the API's scope gate already guards console-initiated scans.
@@ -99,8 +101,12 @@ orchestrator/
   activities.py           Scope gate, engine activities, triage, reporting.
   worker.py               Registers workflows + activities.
   adapters/               ScannerAdapter protocol + Nmap / Nessus / Burp / Nikto.
-  api/                    Read-only FastAPI console API (per docs/api-contract.md).
-  Dockerfile              API service image (FastAPI + uvicorn).
+  triage/                 Deterministic triage: dedup, severity, SLA, OWASP/SANS/CIS maps.
+  normalization.py        Bridges raw multi-tool adapter output into the triage engine.
+  reporting/              xlsx / docx / dual-password PDF export engine.
+  api/                    FastAPI console API: reads, writes, reports, audit (per
+                          docs/api-contract.md). api/db.py persists audit to Postgres.
+  Dockerfile              API service image (FastAPI + uvicorn + psycopg + report libs).
   requirements.txt
 frontend/
   index.html + *.jsx      Vulnerability Console UI (zero-build React + Babel):

@@ -195,6 +195,15 @@
         return d.audit || [];
       } catch (err) { warnOnce("GET /api/audit", err); return []; }
     },
+    // Generate a report (xlsx/docx/pdf). Throws on failure (no faked success).
+    // Returns { reportId, generatedAt, files: { <fmt>: "<download path>" } }.
+    generateReport(body) {
+      return sendJSON("/api/reports", body, "POST");
+    },
+    // Absolute URL to download a generated report file (xlsx|docx|pdf).
+    reportDownloadUrl(reportId, fmt) {
+      return window.API_BASE + "/api/reports/" + encodeURIComponent(reportId) + "/" + encodeURIComponent(fmt);
+    },
   };
 
   // Build the convenience rollup from the mock, matching /api/dashboard shape.

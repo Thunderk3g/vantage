@@ -9,13 +9,18 @@ Run:
 
 from __future__ import annotations
 
+import os
+import secrets
+import tempfile
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from . import seed
+from orchestrator.reporting.export import build_xlsx, build_docx, build_pdf
 
 app = FastAPI(title="Vantage API", version="0", description="Read-only vulnerability-scanner console API.")
 
@@ -298,3 +303,122 @@ def request_exception(body: dict = Body(...)):
 @app.get("/api/audit")
 def get_audit(limit: Optional[int] = Query(None, ge=1)):
     return {"audit": seed.audit(limit)}
+
+
+# ---------------------------------------------------------------------------
+# Reporting (v0.1) — expose the Vantage reporting engine. POST generates the
+# requested formats from scope-filtered findings into a fresh temp dir; the
+# in-memory registry maps reportId -> {fmt: filesystem path}; GET streams a
+# file back as a download. The PDF is AES-256 encrypted with a dual password.
+# ---------------------------------------------------------------------------
+
+ALLOWED_FORMATS = {"xlsx", "docx", "pdf"}
+
+# Media types per requested format, used on download.
+_REPORT_MEDIA = {
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "pdf": "application/pdf",
+}
+
+# In-memory report registry: {reportId: {fmt: absolute_path}}.
+_REPORTS: dict[str, dict[str, str]] = {}
+
+
+def _new_report_id() -> str:
+    """Unique-ish report id like 'RPT-XXXXXX' (6 hex uppercase chars)."""
+    return "RPT-" + secrets.token_hex(3).upper()
+
+
+@app.post("/api/reports")
+def create_report(body: dict = Body(...)):
+    by = body.get("by")
+    scope = body.get("scope", "all")
+    formats = body.get("formats")
+    open_password = body.get("openPassword")
+    owner_password = body.get("ownerPassword")
+    template = body.get("template")
+
+    if not by or not str(by).strip():
+        return _err(422, "missing_actor", "A human 'by' is required for this mutation")
+
+    if not isinstance(formats, list) or not formats:
+        return _err(422, "invalid_formats", "'formats' must be a non-empty list")
+    fmt_list = [str(f).strip().lower() for f in formats]
+    if not set(fmt_list) <= ALLOWED_FORMATS:
+        return _err(
+            422,
+            "invalid_formats",
+            f"'formats' must be a subset of {sorted(ALLOWED_FORMATS)}",
+        )
+
+    if "pdf" in fmt_list:
+        if not open_password or not owner_password:
+            return _err(
+                422,
+                "missing_pdf_passwords",
+                "pdf format requires both 'openPassword' and 'ownerPassword'",
+            )
+        if str(open_password) == str(owner_password):
+            return _err(
+                422,
+                "pdf_passwords_equal",
+                "'openPassword' and 'ownerPassword' must differ",
+            )
+
+    # Filter findings by scope: "all" -> everything; else an assetId.
+    items = seed.findings()
+    if scope and scope != "all":
+        items = [f for f in items if f["assetId"].lower() == str(scope).lower()]
+
+    meta = {"title": f"Vantage {template or 'audit'} report"} if template else None
+
+    report_id = _new_report_id()
+    outdir = tempfile.mkdtemp(prefix=f"vantage-{report_id}-")
+
+    files: dict[str, str] = {}
+    paths: dict[str, str] = {}
+    # Generate ONLY the requested formats (dedup, preserve canonical order).
+    for fmt in ("xlsx", "docx", "pdf"):
+        if fmt not in fmt_list:
+            continue
+        path = os.path.join(outdir, f"vantage-{report_id}.{fmt}")
+        if fmt == "xlsx":
+            build_xlsx(items, path, meta=meta)
+        elif fmt == "docx":
+            build_docx(items, path, meta=meta)
+        else:  # pdf
+            build_pdf(items, path, str(open_password), str(owner_password), meta=meta)
+        paths[fmt] = path
+        files[fmt] = f"/api/reports/{report_id}/{fmt}"
+
+    _REPORTS[report_id] = paths
+
+    generated_at = datetime.now(timezone.utc).isoformat()
+    seed.record_audit(
+        actor=str(by),
+        action="REPORT_GENERATED",
+        entity_type="report",
+        entity_id=report_id,
+        summary=f"{','.join(files)} report generated for scope {scope} by {by}",
+    )
+
+    return JSONResponse(
+        status_code=201,
+        content={"reportId": report_id, "generatedAt": generated_at, "files": files},
+    )
+
+
+@app.get("/api/reports/{report_id}/{fmt}")
+def download_report(report_id: str, fmt: str):
+    fmt = fmt.lower()
+    paths = _REPORTS.get(report_id)
+    if not paths or fmt not in paths:
+        raise HTTPException(status_code=404, detail=f"Report not found: {report_id}/{fmt}")
+    return FileResponse(
+        paths[fmt],
+        media_type=_REPORT_MEDIA[fmt],
+        headers={
+            "Content-Disposition": f'attachment; filename="vantage-{report_id}.{fmt}"'
+        },
+    )

@@ -189,8 +189,15 @@ async def normalize_and_triage(scan_id: str) -> int:
        2. LLM batch pass (redacted) for fuzzy dedup, FP scoring, notes.
     Returns the number of canonical findings persisted.
     """
-    from triage.engine import run_triage           # see §2 of architecture
-    findings: list[CanonicalFinding] = run_triage(scan_id)
+    import normalization                            # raw multi-tool -> triage
+
+    # TODO: load the persisted adapter parse() output for this scan and key it
+    # by source_tool. Placeholder/stub source until adapter outputs are
+    # persisted to the datastore (one list of CanonicalFinding per tool).
+    raw_by_tool: dict[str, list] = _load_raw_findings_by_tool(scan_id)
+
+    # Deterministic first pass: merge -> dedup -> severity -> SLA -> taxonomy.
+    findings: list[dict] = normalization.normalize_and_triage(raw_by_tool)
     _persist_findings_and_slas(scan_id, findings)
     _audit("system", "TRIAGE_COMPLETED", "scan", scan_id,
            after={"finding_count": len(findings)})
@@ -229,5 +236,6 @@ def _authorization_still_valid(authz_id: str) -> bool: ...
 def _insert_scan(req, token) -> str: ...
 def _update_scan_phase(scan_id: str, phase: str) -> None: ...
 def _update_scan_status(scan_id: str, status: str) -> None: ...
+def _load_raw_findings_by_tool(scan_id: str) -> dict[str, list]: ...  # stub
 def _persist_findings_and_slas(scan_id, findings) -> None: ...
 def _audit(actor, action, entity_type, entity_id, *, after=None, before=None) -> None: ...

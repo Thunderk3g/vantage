@@ -39,8 +39,10 @@ Keep it honest: check a box only when the exit criteria are met and verified.
 - [x] Nessus adapter (VA) with hardened parsing
 - [ ] Normalization engine (raw → `CanonicalFinding`)
 - [x] Deterministic triage engine (`orchestrator/triage/`): dedup + CVSS→severity
-      + SLA + OWASP/SANS/CIS mapping tables (unit-tested; not yet wired into the
-      pipeline activities)
+      + SLA + OWASP/SANS/CIS mapping tables (unit-tested)
+- [x] Triage wired into the pipeline via `orchestrator/normalization.py` (raw
+      multi-tool → merge → triage) + `activities.normalize_and_triage`; unit-tested
+      (raw adapter source still stubbed pending persisted scan output)
 - [x] Excel report export (`orchestrator/reporting/`: xlsx/docx/dual-password PDF
       engine, unit-tested; not yet wired to an API endpoint/screen)
 - [x] Human-review UI: validate via the write path (status workflow)
@@ -70,8 +72,9 @@ Keep it honest: check a box only when the exit criteria are met and verified.
       via `DATABASE_URL`, with in-memory fallback; verified in the Docker stack)
 - [ ] Finding/scan/exception *state* persists to Postgres (still in-memory store)
 - [ ] FP confirm/clear workflow + risk-acceptance via approved exception
-- [ ] Reports screen triggers real export (wire `orchestrator/reporting/` to a
-      `POST /api/reports` + the screen's generate flow)
+- [x] Reports screen triggers real export — `POST /api/reports` (xlsx/docx/
+      dual-password PDF) + `GET /api/reports/{id}/{fmt}` download, wired to the
+      screen's generate flow (open + owner passwords)
 - [ ] Auth/RBAC: real `actor` from SSO replaces the `"A. Mehta"` placeholder
 
 ## Phase 2 — Web MVP  `target: 3–4 wks`

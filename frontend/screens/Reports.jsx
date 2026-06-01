@@ -46,19 +46,50 @@
     const [fmt, setFmt] = useState("pdf");
     const [scope, setScope] = useState("all");
     const [stage, setStage] = useState("config"); // config | password | generating | done
-    const [pw, setPw] = useState("");
-    const [pw2, setPw2] = useState("");
+    const [openPw, setOpenPw] = useState("");   // password to open the PDF
+    const [ownerPw, setOwnerPw] = useState(""); // owner password (prevents copy/modify)
+    const [err, setErr] = useState("");         // surfaced error message (server or client)
+    const [result, setResult] = useState(null); // { reportId, generatedAt, files }
 
     const fmtMeta = FORMATS.find(f => f.id === fmt);
     const needsPw = fmtMeta.protect;
 
+    // Single-format picker on this screen: send [fmt]. (Array shape supports
+    // multi-format if the picker ever becomes multi-select.)
+    const formats = [fmt];
+
     const generate = () => {
+      setErr("");
       if (needsPw) { setStage("password"); return; }
       run();
     };
-    const run = () => {
+
+    const run = async () => {
+      // Client-side guard for the PDF contract: two NON-EMPTY, DIFFERING
+      // passwords. The server still enforces this (422) — we never fake it.
+      if (needsPw) {
+        if (!openPw || !ownerPw) { setErr("Both passwords are required."); return; }
+        if (openPw === ownerPw) { setErr("Passwords must differ."); return; }
+      }
+      setErr("");
       setStage("generating");
-      setTimeout(() => setStage("done"), 1400);
+      try {
+        const res = await window.api.generateReport({
+          template: tpl,
+          scope,
+          formats,
+          openPassword: needsPw ? openPw : undefined,
+          ownerPassword: needsPw ? ownerPw : undefined,
+          by: "A. Mehta", // TODO: real user from auth
+        });
+        setResult(res);
+        setStage("done");
+      } catch (e) {
+        // Surface the server message on the stage we came from so the user can
+        // correct input and retry. Never advance to "done".
+        setErr((e && e.message) || "Report generation failed.");
+        setStage(needsPw ? "password" : "config");
+      }
     };
 
     return (
@@ -126,6 +157,7 @@
               <div className="row between t-sm"><span className="faint">Protection</span><span style={{ fontWeight: 500 }}>{needsPw ? "Password" : "None"}</span></div>
               <div className="row between t-sm"><span className="faint">Classification</span><span className="chip" style={{ color: "var(--danger)", background: "var(--sev-critical-bg)", borderColor: "var(--sev-critical-border)" }}>Confidential</span></div>
               <button className="btn primary full mt2" onClick={generate}><Icon.download size={15} /> Generate {fmtMeta.name}</button>
+              {err && stage === "config" && <span className="t-xs" style={{ color: "var(--danger)" }}>{err}</span>}
             </div>
             <div className="card card-pad t-xs faint col gap2">
               <span className="row gap2"><Icon.lock size={13} /> Final PDFs are AES-256 encrypted.</span>
@@ -143,14 +175,15 @@
                 <div><h3 className="t-h2" style={{ margin: 0 }}>Protect final PDF</h3><div className="t-xs faint mt1">Required for confidential distribution. Share the password over a separate channel.</div></div>
               </div>
               <div className="modal-body col gap4">
-                <div className="col gap2"><label className="t-label">Password</label><input className="input" type="password" value={pw} onChange={e => setPw(e.target.value)} placeholder="Min 12 chars, 1 symbol" /></div>
-                <div className="col gap2"><label className="t-label">Confirm password</label><input className="input" type="password" value={pw2} onChange={e => setPw2(e.target.value)} /></div>
-                {pw && pw2 && pw !== pw2 && <span className="t-xs" style={{ color: "var(--danger)" }}>Passwords don't match.</span>}
+                <div className="col gap2"><label className="t-label">Password to open</label><input className="input" type="password" value={openPw} onChange={e => { setOpenPw(e.target.value); setErr(""); }} placeholder="Min 12 chars, 1 symbol" /></div>
+                <div className="col gap2"><label className="t-label">Owner password (prevents copy/modify)</label><input className="input" type="password" value={ownerPw} onChange={e => { setOwnerPw(e.target.value); setErr(""); }} placeholder="Must differ from the open password" /></div>
+                {openPw && ownerPw && openPw === ownerPw && <span className="t-xs" style={{ color: "var(--danger)" }}>Passwords must differ.</span>}
+                {err && <span className="t-xs" style={{ color: "var(--danger)" }}>{err}</span>}
                 <label className="row gap2 t-sm"><span className="checkbox on"><Icon.check size={11} strokeWidth={3} /></span> Log this export to the audit trail</label>
               </div>
               <div className="modal-foot">
-                <button className="btn" onClick={() => setStage("config")}>Cancel</button>
-                <button className="btn primary" disabled={pw.length < 12 || pw !== pw2} onClick={run}><Icon.lock size={14} /> Encrypt &amp; generate</button>
+                <button className="btn" onClick={() => { setErr(""); setStage("config"); }}>Cancel</button>
+                <button className="btn primary" disabled={openPw.length < 12 || !ownerPw || openPw === ownerPw} onClick={run}><Icon.lock size={14} /> Encrypt &amp; generate</button>
               </div>
             </div>
           </>
@@ -167,8 +200,19 @@
                   <div className="bar-track full"><div className="bar-fill" style={{ width: "70%" }} /></div>
                 </> : <>
                   <span className="center" style={{ width: 48, height: 48, borderRadius: 12, background: "var(--ok-bg)", color: "var(--ok)" }}><Icon.check size={26} strokeWidth={2.5} /></span>
-                  <div><h3 className="t-h2" style={{ margin: 0 }}>Report ready</h3><p className="t-sm faint mt1 mono">vuln-report-2026-06-01.{fmt}{needsPw ? " · encrypted" : ""}</p></div>
-                  <div className="row gap3"><button className="btn" onClick={() => setStage("config")}>Close</button><button className="btn primary"><Icon.download size={14} /> Download</button></div>
+                  <div>
+                    <h3 className="t-h2" style={{ margin: 0 }}>Report ready</h3>
+                    {result && <p className="t-xs faint mt1 mono">{result.reportId} · {result.generatedAt}{needsPw ? " · encrypted" : ""}</p>}
+                  </div>
+                  <div className="col gap2 full">
+                    {result && Object.keys(result.files || {}).map(f => {
+                      const I = (FORMATS.find(ff => ff.id === f) || {}).icon || Icon.download;
+                      return <a key={f} className="btn primary full" href={window.api.reportDownloadUrl(result.reportId, f)} target="_blank" rel="noopener noreferrer">
+                        <I size={14} /> Download {(FORMATS.find(ff => ff.id === f) || { name: f }).name}
+                      </a>;
+                    })}
+                  </div>
+                  <div className="row gap3"><button className="btn" onClick={() => setStage("config")}>Close</button></div>
                 </>}
               </div>
             </div>

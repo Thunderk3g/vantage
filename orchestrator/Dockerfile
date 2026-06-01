@@ -4,10 +4,13 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# The API needs only FastAPI + uvicorn + psycopg (for the audit-log
-# persistence). The full orchestrator requirements.txt pulls heavier packages
-# (temporalio, reporting libs) this service doesn't use — install the lean subset.
-RUN pip install --no-cache-dir "fastapi>=0.110" "uvicorn[standard]>=0.29" "psycopg[binary]>=3.2"
+# The API needs FastAPI + uvicorn + psycopg (for the audit-log persistence),
+# plus the reporting engine's deps (openpyxl/python-docx/reportlab/pikepdf) so
+# the /api/reports endpoint can generate xlsx/docx and dual-password PDFs. The
+# full orchestrator requirements.txt pulls heavier packages (temporalio) this
+# service doesn't use — install the lean subset.
+RUN pip install --no-cache-dir "fastapi>=0.110" "uvicorn[standard]>=0.29" "psycopg[binary]>=3.2" \
+    openpyxl python-docx reportlab pikepdf
 
 # Copy the orchestrator package to /app/orchestrator so `orchestrator.api.main`
 # is importable (orchestrator is a namespace package; api has __init__.py).

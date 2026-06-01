@@ -147,7 +147,23 @@ Body: `{ "findingId": "VLN-…", "requestedBy": "<name>", "durationMonths": <int
 Returns `{ "audit": [ { "seq", "ts", "actor", "action", "entityType", "entityId", "summary" }, … ] }`, most-recent first. Simplified in-memory mirror of the
 hash-chained `audit_log` table.
 
+### `POST /api/reports` — generate a report
+Body: `{ "template": "audit|exec|asset|sla", "scope": "all|<assetId>", "formats": ["xlsx","docx","pdf"], "openPassword"?: "<str>", "ownerPassword"?: "<str>", "by": "<name>" }`
+- `by` required (human actor) → 422.
+- `formats` ⊆ `{xlsx,docx,pdf}`, non-empty → 422.
+- **If `pdf` ∈ formats:** `openPassword` and `ownerPassword` are required and must
+  **differ** (422) — the open password unlocks viewing; the owner password lifts
+  the copy/modify/print restriction. (The dual-password PDF is the whole point.)
+- Generates the requested formats from the current findings filtered by `scope`,
+  using `orchestrator/reporting/`. Audited `REPORT_GENERATED`.
+- **201** → `{ "reportId": "RPT-…", "generatedAt": "<iso>", "files": { "xlsx": "/api/reports/RPT-…/xlsx", "pdf": "/api/reports/RPT-…/pdf", … } }` (only requested formats).
+
+### `GET /api/reports/{reportId}/{fmt}` — download
+- Streams the file (`fmt` ∈ `xlsx|docx|pdf`) as an attachment with the right
+  content-type and `Content-Disposition`. 404 if unknown id/fmt.
+
 ## Client write methods (`frontend/api.js`)
 `window.api.setFindingStatus(id, body)`, `.startScan(body)`,
-`.requestException(body)`, `.audit(limit)`. Write methods **throw** on failure
+`.requestException(body)`, `.audit(limit)`, `.generateReport(body)`,
+`.reportDownloadUrl(reportId, fmt)`. Write methods **throw** on failure
 (Error carries `.status` and `.data`); screens must show the error, not fake success.
