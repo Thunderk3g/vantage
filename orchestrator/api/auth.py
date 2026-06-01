@@ -26,6 +26,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import secrets
 import time
 from dataclasses import asdict, dataclass
@@ -348,6 +349,12 @@ def map_groups_to_roles(groups: list[str]) -> list[str]:
 # §4 LDAP group resolution (optional, fail-soft)
 # ---------------------------------------------------------------------------
 
+# An LDAP filter value is attacker-influenceable (the email/UPN comes from the
+# IdP claims, which a user may control). Reject anything carrying LDAP/DN
+# metacharacters BEFORE it ever reaches a filter — defence in depth on top of
+# escaping. Must contain exactly one '@' and no , \ * ( ) NUL.
+_LDAP_SAFE_EMAIL_RE = re.compile(r"^[^,\\*()\x00]+@[^,\\*()\x00]+$")
+
 
 def _ldap_connect():
     """Bind a service connection to LDAP_URL. Private so tests can monkeypatch
@@ -369,11 +376,19 @@ def resolve_groups_via_ldap(email: str) -> list[str]:
     (never crashes login). Only meaningful when ``LDAP_URL`` is set."""
     if not _env("LDAP_URL").strip():
         return []
+    # Validate the shape first: bail (no search) on anything with LDAP/DN
+    # metacharacters, so a crafted IdP email can never alter the filter tree.
+    if not email or not _LDAP_SAFE_EMAIL_RE.match(email):
+        return []
     try:
+        from ldap3.utils.conv import escape_filter_chars
+
         conn = _ldap_connect()
         try:
+            # LDAP_USER_FILTER is trusted operator config; the interpolated
+            # `email` is NOT — escape it (RFC 4515) before formatting.
             user_filter = _env("LDAP_USER_FILTER") or "(userPrincipalName={email})"
-            search_filter = user_filter.format(email=email)
+            search_filter = user_filter.format(email=escape_filter_chars(email))
             conn.search(
                 search_base=_env("LDAP_USER_BASE"),
                 search_filter=search_filter,

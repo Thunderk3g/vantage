@@ -46,10 +46,13 @@ from api.auth import (  # noqa: E402
     map_groups_to_roles,
     mint_session,
     require_role,
+    resolve_groups_via_ldap,
     session_actor,
     validate_id_token,
 )
 import api.auth as auth  # noqa: E402
+
+_ORIG_LDAP_CONNECT = auth._ldap_connect  # restored after the injection-guard test
 
 ISSUER = "https://idp.vantage.test"
 CLIENT_ID = "vantage-client"
@@ -341,6 +344,49 @@ def test_session_actor():
     print("  [ok] session_actor renders 'Name <email>'")
 
 
+# ---------------------------------------------------------------------------
+# 8. LDAP filter-injection guard (security review)
+# ---------------------------------------------------------------------------
+
+
+def test_ldap_injection_guard():
+    """A crafted IdP email must never reach the LDAP filter unescaped, and an
+    email carrying LDAP/DN metacharacters is rejected before any search."""
+
+    class _FakeEntry:
+        memberOf = type("MO", (), {"values": ["CN=SEC-AppSec,OU=G,DC=corp"]})()
+
+    class _FakeConn:
+        last_filter = None
+
+        def search(self, search_base, search_filter, attributes):
+            type(self).last_filter = search_filter
+
+        @property
+        def entries(self):
+            return [_FakeEntry()]
+
+        def unbind(self):
+            pass
+
+    auth._ldap_connect = lambda: _FakeConn()  # monkeypatch: no live directory
+    try:
+        with _Env(LDAP_URL="ldaps://dc.test:636", LDAP_USER_BASE="DC=corp", LDAP_USER_FILTER=None):
+            # 1) Injection attempt: metacharacters -> rejected, NO search issued.
+            _FakeConn.last_filter = None
+            evil = "x)(uid=*))(|(memberOf=*"
+            assert resolve_groups_via_ldap(evil) == []
+            assert _FakeConn.last_filter is None, "search must not run on a metachar email"
+
+            # 2) Benign email -> search runs with the expected, intact filter.
+            groups = resolve_groups_via_ldap("user@corp.com")
+            assert _FakeConn.last_filter == "(userPrincipalName=user@corp.com)", _FakeConn.last_filter
+            assert groups == ["CN=SEC-AppSec,OU=G,DC=corp"]
+    finally:
+        auth._ldap_connect = _ORIG_LDAP_CONNECT
+    print("  [ok] LDAP filter-injection guard: metachar email rejected; benign email intact")
+
+
 def main():
     tests = [
         test_valid_id_token_maps_to_analyst,
@@ -350,6 +396,7 @@ def main():
         test_require_role,
         test_dev_and_prod_cookieless,
         test_session_actor,
+        test_ldap_injection_guard,
     ]
     print("Running Vantage auth core self-test...\n")
     for t in tests:
