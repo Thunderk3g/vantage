@@ -32,6 +32,9 @@ reports/*.xlsx
 reports/*.docx
 reports/*.pdf
 
+# --- Design handoff bundle (provenance, kept local; not source) ---
+.design-ref/
+
 # --- OS / editor ---
 .DS_Store
 Thumbs.db

@@ -48,8 +48,13 @@ orchestrator/
   worker.py               Registers workflows + activities.
   adapters/               ScannerAdapter protocol + Nmap / Nessus / Burp / Nikto.
   requirements.txt
+frontend/
+  index.html + *.jsx      Vulnerability Console UI (zero-build React + Babel):
+                          Dashboard, Findings, Finding detail, Start a scan,
+                          SLA tracker, Exceptions, Reports, Design system.
 docs/
   architecture.docx/.pdf  Full architecture & build plan.
+  crawler-integration.md  Note on reusing the seo-repo crawler logic in recon.
   generate_architecture_docx.js
 .github/
   workflows/ci.yml        CI: compile, schema apply, doc smoke-test.
@@ -83,10 +88,16 @@ psql -f db/schema.sql
 pip install -r orchestrator/requirements.txt
 python orchestrator/worker.py            # needs a Temporal cluster
 
-# 3. Regenerate the architecture doc (optional)
+# 3. Web console (Vulnerability Console UI)
+cd frontend && python -m http.server 8137   # open http://localhost:8137
+
+# 4. Regenerate the architecture doc (optional)
 npm install
 node docs/generate_architecture_docx.js
 ```
+
+The console runs on mock data today (`frontend/data.js`) and maps 1:1 to the
+schema; see [`frontend/README.md`](frontend/README.md) for backend wiring.
 
 > The adapter / vault / datastore calls are `NotImplementedError` stubs. This is
 > a **Phase 0/1 structural reference skeleton**, wired up over the roadmap below.

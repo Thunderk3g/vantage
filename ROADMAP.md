@@ -40,7 +40,20 @@ Keep it honest: check a box only when the exit criteria are met and verified.
 - [ ] Normalization engine (raw → `CanonicalFinding`)
 - [ ] Deterministic triage: dedup + CVSS→severity + SLA assignment
 - [ ] Excel report export
-- [ ] Human-review UI: validate / confirm-FP
+- [~] Human-review UI: validate / confirm-FP
+      (console scaffold built in `frontend/`; not yet wired to mutate state)
+
+## UI — Vulnerability Console (`frontend/`)  `spans phases 1–4`
+**Exit:** each screen is wired to the API and replaces its mock data source.
+
+- [x] Console scaffold: shell, nav, role switcher, design system, tweaks
+- [x] All 8 screens laid out on mock data (`data.js`), SLA reconciled to backend
+- [ ] Dashboard / Findings wired to `GET /findings`, `/scans`
+- [ ] Finding detail status workflow → API mutations (human-gated)
+- [ ] Start-a-scan posts to the scope gate (approved inventory only)
+- [ ] Reports screen triggers real export (incl. dual-password PDF step)
+- [ ] SLA tracker + Exceptions wired to live data
+- [ ] Auth/RBAC: real role from SSO replaces the role switcher
 
 ## Phase 2 — Web MVP  `target: 3–4 wks`
 **Exit:** web pipeline parity.
