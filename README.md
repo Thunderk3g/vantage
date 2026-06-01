@@ -87,6 +87,21 @@ Ordered roughly by dependency. Tracked live in **[ROADMAP.md](ROADMAP.md)**.
 > movement, or auto-remediation. Validation and manual PT stay human-gated and
 > downstream. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
+### Security posture (reference build — read before deploying)
+
+The API has **no authentication yet** — auth/RBAC (#7) is the headline security
+slice. Until it lands, two known, tracked gaps exist by design:
+
+- **Actor is client-supplied.** Every write sends a `by`/`actor` placeholder
+  (the console sends `"A. Mehta"`); audit attribution is therefore *advisory*,
+  not authenticated. When auth lands, the actor is derived from the session.
+- **Report downloads are capability-token-gated.** `GET /api/reports/{id}/{fmt}`
+  is protected only by an opaque ~192-bit `reportId` (TTL-bounded), not per-user
+  authz. When auth lands, downloads become owner/role-scoped.
+
+Do not expose this build outside a trusted network until #7 is done. The
+remaining write endpoints inherit the same no-auth caveat.
+
 ## Repository layout
 
 ```

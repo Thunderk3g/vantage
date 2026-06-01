@@ -156,11 +156,17 @@ Body: `{ "template": "audit|exec|asset|sla", "scope": "all|<assetId>", "formats"
   the copy/modify/print restriction. (The dual-password PDF is the whole point.)
 - Generates the requested formats from the current findings filtered by `scope`,
   using `orchestrator/reporting/`. Audited `REPORT_GENERATED`.
-- **201** → `{ "reportId": "RPT-…", "generatedAt": "<iso>", "files": { "xlsx": "/api/reports/RPT-…/xlsx", "pdf": "/api/reports/RPT-…/pdf", … } }` (only requested formats).
+- **201** → `{ "reportId": "RPT-<opaque>", "generatedAt": "<iso>", "files": { "xlsx": "/api/reports/RPT-<opaque>/xlsx", … } }` (only requested formats).
+- `reportId` is an **opaque, high-entropy capability token** (~192 bits), not a
+  sequential id — the download is gated only by its unguessability **until the
+  auth/RBAC slice lands**, after which download becomes owner/role-scoped.
+  Reports expire after a TTL (≈1h).
 
 ### `GET /api/reports/{reportId}/{fmt}` — download
 - Streams the file (`fmt` ∈ `xlsx|docx|pdf`) as an attachment with the right
-  content-type and `Content-Disposition`. 404 if unknown id/fmt.
+  content-type and `Content-Disposition`. 404 if unknown/expired id/fmt.
+- **No per-user auth yet** (capability-token gated). `TODO(auth)`: require an
+  authenticated caller and enforce the report's `owner`/role here.
 
 ## Client write methods (`frontend/api.js`)
 `window.api.setFindingStatus(id, body)`, `.startScan(body)`,

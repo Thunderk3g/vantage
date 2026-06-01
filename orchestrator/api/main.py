@@ -321,17 +321,37 @@ _REPORT_MEDIA = {
     "pdf": "application/pdf",
 }
 
-# In-memory report registry: {reportId: {fmt: absolute_path}}.
-_REPORTS: dict[str, dict[str, str]] = {}
+# In-memory report registry: {reportId: {"owner", "paths": {fmt: path}, "created"}}.
+#
+# SECURITY: `report_id` is a high-entropy, unguessable *capability token* — it is
+# currently the ONLY thing gating download, because the API has no authentication
+# yet (see ROADMAP "Auth/RBAC"). Two consequences, both tracked:
+#   * Reports must NOT be enumerable -> the id carries ~192 bits of entropy.
+#   * Once auth exists, bind download to `owner` and require the report-read role
+#     (do not rely on the unguessable id as access control).
+# Entries expire after _REPORT_TTL to bound the exposure window.
+_REPORTS: dict[str, dict] = {}
+_REPORT_TTL = 3600  # seconds
 
 
 def _new_report_id() -> str:
-    """Unique-ish report id like 'RPT-XXXXXX' (6 hex uppercase chars)."""
-    return "RPT-" + secrets.token_hex(3).upper()
+    """Opaque, high-entropy report id (~192 bits) used as a capability token."""
+    return "RPT-" + secrets.token_urlsafe(24)
+
+
+def _prune_reports() -> None:
+    """Drop reports past their TTL (bounds how long a leaked URL stays live)."""
+    now = datetime.now(timezone.utc).timestamp()
+    for rid in [r for r, e in _REPORTS.items() if now - e["created"] > _REPORT_TTL]:
+        _REPORTS.pop(rid, None)
 
 
 @app.post("/api/reports")
 def create_report(body: dict = Body(...)):
+    # SECURITY: `by` is a CLIENT-SUPPLIED actor placeholder — the API has no auth
+    # yet (ROADMAP "Auth/RBAC"), so audit attribution is advisory until the actor
+    # is derived from an authenticated session. This caveat applies to every write
+    # endpoint, not just reports; it is the headline item of the auth slice.
     by = body.get("by")
     scope = body.get("scope", "all")
     formats = body.get("formats")
@@ -392,7 +412,12 @@ def create_report(body: dict = Body(...)):
         paths[fmt] = path
         files[fmt] = f"/api/reports/{report_id}/{fmt}"
 
-    _REPORTS[report_id] = paths
+    _REPORTS[report_id] = {
+        "owner": str(by),   # creator; enforced as an authz check once auth exists
+        "paths": paths,
+        "created": datetime.now(timezone.utc).timestamp(),
+    }
+    _prune_reports()
 
     generated_at = datetime.now(timezone.utc).isoformat()
     seed.record_audit(
@@ -411,14 +436,17 @@ def create_report(body: dict = Body(...)):
 
 @app.get("/api/reports/{report_id}/{fmt}")
 def download_report(report_id: str, fmt: str):
+    # SECURITY: gated only by the unguessable, TTL-bounded report_id (capability
+    # token) — there is no auth yet. TODO(auth): require an authenticated caller
+    # and enforce `entry["owner"] == current_user` (or a report-read role) here.
+    _prune_reports()
     fmt = fmt.lower()
-    paths = _REPORTS.get(report_id)
-    if not paths or fmt not in paths:
+    entry = _REPORTS.get(report_id)
+    if not entry or fmt not in entry["paths"]:
         raise HTTPException(status_code=404, detail=f"Report not found: {report_id}/{fmt}")
     return FileResponse(
-        paths[fmt],
+        entry["paths"][fmt],
         media_type=_REPORT_MEDIA[fmt],
-        headers={
-            "Content-Disposition": f'attachment; filename="vantage-{report_id}.{fmt}"'
-        },
+        # Don't echo the capability token into the saved filename.
+        headers={"Content-Disposition": f'attachment; filename="vantage-report.{fmt}"'},
     )
