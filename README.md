@@ -4,7 +4,7 @@
 > (BFSI · IRDAI-regulated · ISO 27001:2022). Internal InfoSec / AppSec tooling.
 
 [![CI](https://github.com/Thunderk3g/vantage/actions/workflows/ci.yml/badge.svg)](https://github.com/Thunderk3g/vantage/actions/workflows/ci.yml)
-![status](https://img.shields.io/badge/status-Phase%200%2F1%20reference-blue)
+![status](https://img.shields.io/badge/status-console%2BAPI%20integrated%20%C2%B7%20engines%20stubbed-blue)
 ![license](https://img.shields.io/badge/license-Internal-lightgrey)
 
 Vantage **detects, triages, and reports** vulnerabilities across infrastructure
@@ -32,6 +32,53 @@ positives, normalize severity, assign IRDAI-mandated SLAs, and draft reports.
 | **Governance** | Escalation staircase (Day 0 → 2 → 4 → 8–10 → 15–20) and exception routing (CISO ≤3mo · RMC >3–12mo · Board >12mo) enforced in the schema. |
 | **Reporting** | Excel, Word, and a dual-password (open + copy/modify) PDF. |
 | **Audit** | Append-only, hash-chained audit log; UPDATE/DELETE blocked by trigger. |
+
+## Status — what's built vs. what's left
+
+This is a **reference build**: the architecture, data model, API, and console are
+real and verified; the scanning engines, triage, reporting, and security plumbing
+are designed and scaffolded but not yet wired to live systems.
+
+| Component | State | Notes |
+|---|---|---|
+| Architecture & data model | ✅ Done | `docs/architecture.*`; reviewed end-to-end. |
+| Database schema (`db/schema.sql`) | ✅ Done | Applies on Postgres 16; SLA trigger, audit hash-chain, exception-routing CHECK all **verified** (and smoke-tested in CI + Docker). |
+| Read-only API (`orchestrator/api/`) | ✅ Done | FastAPI, all endpoints per `docs/api-contract.md`, CORS scoped to the console. **Serves a seed dataset** (not the DB yet). |
+| Web console — 8 screens | ✅ Done | Built from the design handoff; **all screens read-wired to the API** with loading states + offline fallback. |
+| Docker stack (web + api + db) | ✅ Done | `docker compose up`; CI builds + boots + smoke-tests it. |
+| Orchestrator workflows (Temporal) | 🟡 Skeleton | Phase gating + hard stop before exploitation are real; activities are `NotImplementedError` stubs. |
+| Scanner adapters | 🟡 Skeleton | Contracts + result parsers exist; engine calls + vault creds stubbed. |
+| Scope gate / scheduler | 🟡 Skeleton | Logic + DB ledger defined; inventory resolution + token signing stubbed. |
+| AI triage / LLM | ⬜ Designed | Deterministic-first + redacted batch design; not implemented. |
+| Reporting engine (xlsx/docx/2-pwd pdf) | ⬜ Designed | Stack chosen (openpyxl / python-docx / pikepdf); not implemented. |
+| Auth / RBAC / SSO | ⬜ Designed | Console role switcher is a **mock**; no real authz yet. |
+| Secrets / vault | ⬜ Designed | CyberArk/Vault integration designed; not wired. |
+
+## What's left for integration
+
+Ordered roughly by dependency. Tracked live in **[ROADMAP.md](ROADMAP.md)**.
+
+1. **API → real datastore.** Replace the API's seed with `psycopg` reads from the
+   Postgres schema (already provisioned by Compose). Read path first, same contract.
+2. **Write path (human-gated mutations).** `POST` endpoints behind the API:
+   finding status workflow, false-positive confirmation, exception requests (with
+   CISO/RMC/Board tier routing). **Start-a-scan must pass the scope gate
+   server-side** — no target outside the approved inventory is acceptable.
+3. **Scope gate + scheduler.** Implement inventory resolution, Ed25519 token
+   signing (vault), and the scan cadence (internal/public 2×/yr, CIS 1×/yr).
+4. **Scanner adapter bodies.** Wire Nmap / Nessus / Burp / Nikto (and the OSS
+   ZAP / Nuclei / Trivy variant) engine calls + least-privilege vault creds.
+5. **AI triage layer.** Redaction proxy + self-hosted LLM batch triage; reconcile
+   LLM output against the deterministic severity bands; low-confidence → human queue.
+6. **Reporting engine.** xlsx / docx / dual-password PDF export, wired to the
+   Reports screen's generate flow.
+7. **Auth.** SSO + RBAC replacing the role switcher; per-role API authorization.
+8. **Hardening.** Non-root images, vault-sourced secrets, TLS/reverse proxy,
+   pen-test of Vantage itself, ISO 27001 evidence pack.
+
+> **Boundary that never moves:** none of the above adds exploitation, lateral
+> movement, or auto-remediation. Validation and manual PT stay human-gated and
+> downstream. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Repository layout
 
@@ -63,8 +110,9 @@ docs/
   crawler-integration.md  Note on reusing the seo-repo crawler logic in recon.
   generate_architecture_docx.js
 .github/
-  workflows/ci.yml        CI: compile, schema apply, doc smoke-test.
-  ISSUE_TEMPLATE/         Scope-item, engine-adapter, and finding templates.
+  workflows/ci.yml        CI: orchestrator compile + scope guard, schema apply
+                          + smoke tests, frontend JSX, docs, Docker build + boot.
+  ISSUE_TEMPLATE/         Scope-item, engine-adapter, and bug templates.
 ROADMAP.md                Phase-by-phase scope tracker (the source of truth for scope).
 CONTRIBUTING.md           How we track and work on scope.
 ```
@@ -121,11 +169,15 @@ npm install
 node docs/generate_architecture_docx.js
 ```
 
-The console runs on mock data today (`frontend/data.js`) and maps 1:1 to the
-schema; see [`frontend/README.md`](frontend/README.md) for backend wiring.
+All 8 console screens fetch from the API (8138) with a graceful **offline
+fallback** to the bundled mock data (`frontend/data.js`), so the console still
+renders if the API is down. The API currently serves a seed dataset that maps
+1:1 to the schema; see [`frontend/README.md`](frontend/README.md) and
+[`docs/api-contract.md`](docs/api-contract.md).
 
-> The adapter / vault / datastore calls are `NotImplementedError` stubs. This is
-> a **Phase 0/1 structural reference skeleton**, wired up over the roadmap below.
+> The orchestrator's adapter / vault / datastore calls are `NotImplementedError`
+> stubs — see the [status table](#status--whats-built-vs-whats-left) for exactly
+> what's live vs. scaffolded.
 
 ## Scope & roadmap
 
