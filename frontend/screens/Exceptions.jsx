@@ -1,7 +1,7 @@
 /* Exception management — request/track with approval tier + risk docs */
 (function () {
   const { useState } = React;
-  const { Icon, SeverityBadge } = window;
+  const { Icon, SeverityBadge, Empty } = window;
 
   const TIERS = [
     { tier: "CISO", note: "≤ 3 months", who: "Chief Information Security Officer" },
@@ -22,6 +22,23 @@
   }
 
   function Exceptions({ initial, go }) {
+    // Fetch the exception register via the API (falls back to window.EXCEPTIONS offline).
+    const { data, loading } = window.useAsync(() => window.api.exceptions(), []);
+    if (loading && !data) {
+      return (
+        <div>
+          <div className="page-head"><div>
+            <h1 className="t-h1">Exception management</h1>
+            <div className="page-sub">Risk-accepted findings and time-boxed exceptions. Approval tier is set by requested duration.</div>
+          </div></div>
+          <div className="card"><Empty icon={Icon.exception} title="Loading exceptions…">Fetching the exception register.</Empty></div>
+        </div>
+      );
+    }
+    return <ExceptionsView exceptions={data || window.EXCEPTIONS} initial={initial} go={go} />;
+  }
+
+  function ExceptionsView({ exceptions, initial, go }) {
     const [showForm, setShowForm] = useState(!!(initial && initial.finding));
     const [months, setMonths] = useState(2);
     const tier = tierFor(months);
@@ -42,20 +59,20 @@
               <div className="row between"><span className="t-h2">{t.tier}</span><span className="chip mono">{t.note}</span></div>
               <span className="t-sm faint">{t.who}</span>
               <div className="divider" style={{ margin: "8px 0" }} />
-              <span className="t-xs faint">{window.EXCEPTIONS.filter(e => e.tier === t.tier).length} exception(s) at this tier</span>
+              <span className="t-xs faint">{exceptions.filter(e => e.tier === t.tier).length} exception(s) at this tier</span>
             </div>
           ))}
         </div>
 
         <div className="card">
-          <div className="card-head"><h3>Exception register</h3><div className="spacer" /><span className="t-xs faint">{window.EXCEPTIONS.length} total</span></div>
+          <div className="card-head"><h3>Exception register</h3><div className="spacer" /><span className="t-xs faint">{exceptions.length} total</span></div>
           <div className="table-wrap">
             <table className="tbl">
               <thead><tr>
                 <th>Exception</th><th>Finding</th><th>Sev</th><th>Asset</th><th>Duration</th><th>Approval tier</th><th>Status</th><th>Review by</th>
               </tr></thead>
               <tbody>
-                {window.EXCEPTIONS.map(e => (
+                {exceptions.map(e => (
                   <tr key={e.id} onClick={() => go("detail", { id: e.finding })}>
                     <td><div className="cell-strong mono">{e.id}</div><div className="cell-sub" style={{ maxWidth: 220 }}>{e.title}</div></td>
                     <td><span className="mono t-sm">{e.finding}</span></td>

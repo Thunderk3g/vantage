@@ -56,11 +56,11 @@ Keep it honest: check a box only when the exit criteria are met and verified.
 - [x] All 8 screens laid out on mock data (`data.js`), SLA reconciled to backend
 - [x] Read-only API (`orchestrator/api/`, FastAPI) per `docs/api-contract.md`
 - [x] Dashboard + Findings wired to `GET /api/findings` (graceful offline fallback)
-- [ ] Remaining screens (detail, SLA, exceptions, reports, scan) wired to API
-- [ ] Finding detail status workflow → API mutations (human-gated)
+- [x] All 8 screens read-wired to the API (detail, SLA, exceptions, reports, scan)
+      with loading states + offline fallback
+- [ ] Finding detail status workflow → API mutations (human-gated)  ← writes next
 - [ ] Start-a-scan posts to the scope gate (approved inventory only)
 - [ ] Reports screen triggers real export (incl. dual-password PDF step)
-- [ ] SLA tracker + Exceptions wired to live data
 - [ ] Auth/RBAC: real role from SSO replaces the role switcher
 
 ## Phase 2 — Web MVP  `target: 3–4 wks`

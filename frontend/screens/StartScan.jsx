@@ -1,7 +1,7 @@
 /* Start a scan — approved-inventory targets only, pipeline/type/auth config */
 (function () {
   const { useState } = React;
-  const { Icon } = window;
+  const { Icon, Empty } = window;
 
   function Field({ label, hint, children, num }) {
     return (
@@ -34,14 +34,31 @@
   }
 
   function StartScan({ go }) {
+    // Fetch the approved asset inventory via the API (falls back to window.ASSETS offline).
+    const { data, loading } = window.useAsync(() => window.api.assets(), []);
+    if (loading && !data) {
+      return (
+        <div className="content-narrow" style={{ margin: "0 auto" }}>
+          <div className="page-head"><div>
+            <h1 className="t-h1">Start a scan</h1>
+            <div className="page-sub">Targets are restricted to the approved asset inventory — free-text hosts are not permitted.</div>
+          </div></div>
+          <div className="card"><Empty icon={Icon.shield} title="Loading inventory…">Fetching the approved asset inventory from the scanner.</Empty></div>
+        </div>
+      );
+    }
+    return <StartScanView assets={data || window.ASSETS} go={go} />;
+  }
+
+  function StartScanView({ assets: ASSETS, go }) {
     const [target, setTarget] = useState(null);
     const [pipeline, setPipeline] = useState("web");
     const [type, setType] = useState("gray-box");
     const [auth, setAuth] = useState("min-privilege");
     const [submitted, setSubmitted] = useState(false);
 
-    const assets = window.ASSETS.filter(a => pipeline === "web" ? a.type === "web" : a.type === "infra");
-    const sel = window.ASSETS.find(a => a.id === target);
+    const assets = ASSETS.filter(a => pipeline === "web" ? a.type === "web" : a.type === "infra");
+    const sel = ASSETS.find(a => a.id === target);
 
     if (submitted) {
       return (

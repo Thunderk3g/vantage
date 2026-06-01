@@ -1,7 +1,7 @@
 /* Finding detail — evidence, mapping, SLA, status workflow, history */
 (function () {
   const { useState } = React;
-  const { Icon, SeverityBadge, SLAChip, StatusPill, FrameworkChip, EscalationStepper } = window;
+  const { Icon, SeverityBadge, SLAChip, StatusPill, FrameworkChip, EscalationStepper, Empty } = window;
 
   const FLOW = ["open", "triaged", "in_progress", "retest", "closed"];
 
@@ -12,7 +12,25 @@
   }
 
   function FindingDetail({ id, go, role }) {
-    const f = window.FINDINGS.find(x => x.id === id) || window.FINDINGS[0];
+    // Fetch the single finding via the API (falls back to window.FINDINGS offline).
+    const { data, loading } = window.useAsync(() => window.api.finding(id), [id]);
+    if (loading && !data) {
+      return (
+        <div>
+          <div className="row gap2 mb4 t-sm faint">
+            <button className="btn ghost sm" onClick={() => go("findings")}><Icon.chevLeft size={15} /> Findings</button>
+            <Icon.chevRight size={14} /> <span className="mono">{id}</span>
+          </div>
+          <div className="card"><Empty icon={Icon.search} title="Loading finding…">Fetching this finding from the scanner.</Empty></div>
+        </div>
+      );
+    }
+    const finding = data || window.FINDINGS.find(f => f.id === id);
+    return <FindingDetailView finding={finding} id={id} go={go} role={role} />;
+  }
+
+  function FindingDetailView({ finding, id, go, role }) {
+    const f = finding || window.FINDINGS[0];
     const [status, setStatus] = useState(f.status);
     const [note, setNote] = useState("");
 

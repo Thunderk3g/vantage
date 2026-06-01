@@ -1,10 +1,27 @@
 /* SLA & escalation tracker — staircase per finding, who it's with, overdue */
 (function () {
   const { useState, useMemo } = React;
-  const { Icon, SeverityBadge, SLAChip, EscalationStepper, AssetCell } = window;
+  const { Icon, SeverityBadge, SLAChip, EscalationStepper, AssetCell, Empty } = window;
 
   function SLATracker({ go }) {
-    const F = window.FINDINGS;
+    // Fetch findings via the API (falls back to window.FINDINGS offline).
+    const { data, loading } = window.useAsync(() => window.api.findings(), []);
+    if (loading && !data) {
+      return (
+        <div>
+          <div className="page-head"><div>
+            <h1 className="t-h1">SLA &amp; escalation tracker</h1>
+            <div className="page-sub">Day 0 → 2 → 4 → 8–10 → 15–20 escalation staircase. Closure SLAs: Critical 30d · High 60d · Medium 60d.</div>
+          </div></div>
+          <div className="card"><Empty icon={Icon.clock} title="Loading SLA tracker…">Fetching the latest findings from the scanner.</Empty></div>
+        </div>
+      );
+    }
+    return <SLATrackerView findings={(data && data.findings) || window.FINDINGS} go={go} />;
+  }
+
+  function SLATrackerView({ findings, go }) {
+    const F = findings;
     const open = F.filter(f => !f.isClosed && f.deadline);
     const [tab, setTab] = useState("all"); // all | overdue | at_risk
     const ESC = window.ESCALATION;

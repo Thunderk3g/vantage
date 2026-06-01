@@ -1,7 +1,7 @@
 /* Reports — configure, generate, export (Excel/Word/PDF + password step) */
 (function () {
   const { useState } = React;
-  const { Icon } = window;
+  const { Icon, Empty } = window;
 
   const TEMPLATES = [
     { id: "exec", name: "Executive summary", desc: "Posture, SLA health, trend — for CISO / Board", icon: Icon.trend },
@@ -16,6 +16,32 @@
   ];
 
   function Reports({ go }) {
+    // Fetch the approved asset inventory and findings register via the API.
+    // Both fall back to window.ASSETS / window.FINDINGS offline (api.js handles
+    // the per-call fallback internally; the `||` here guards a hard failure).
+    const { data, loading } = window.useAsync(() => Promise.all([
+      window.api.assets(),
+      window.api.findings(),
+    ]).then(([assets, findings]) => ({ assets, findings })), []);
+
+    if (loading && !data) {
+      return (
+        <div className="content-narrow" style={{ margin: "0 auto" }}>
+          <div className="page-head"><div>
+            <h1 className="t-h1">Reports</h1>
+            <div className="page-sub">Generate and export findings reports. Final PDFs are password-protected before distribution.</div>
+          </div></div>
+          <div className="card"><Empty icon={Icon.file} title="Loading report data…">Fetching the asset inventory and findings register.</Empty></div>
+        </div>
+      );
+    }
+
+    const assets = (data && data.assets) || window.ASSETS;
+    const findings = (data && data.findings && data.findings.findings) || window.FINDINGS;
+    return <ReportsView go={go} assets={assets} findings={findings} />;
+  }
+
+  function ReportsView({ go, assets, findings }) {
     const [tpl, setTpl] = useState("audit");
     const [fmt, setFmt] = useState("pdf");
     const [scope, setScope] = useState("all");
