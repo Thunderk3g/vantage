@@ -1,0 +1,4 @@
+node_modules/
+verify-jsx.js
+*.log
+.DS_Store

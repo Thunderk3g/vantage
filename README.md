@@ -47,13 +47,19 @@ orchestrator/
   activities.py           Scope gate, engine activities, triage, reporting.
   worker.py               Registers workflows + activities.
   adapters/               ScannerAdapter protocol + Nmap / Nessus / Burp / Nikto.
+  api/                    Read-only FastAPI console API (per docs/api-contract.md).
+  Dockerfile              API service image (FastAPI + uvicorn).
   requirements.txt
 frontend/
   index.html + *.jsx      Vulnerability Console UI (zero-build React + Babel):
                           Dashboard, Findings, Finding detail, Start a scan,
                           SLA tracker, Exceptions, Reports, Design system.
+  api.js                  REST client (date hydration + offline fallback).
+  Dockerfile              Static console image (nginx).
+docker-compose.yml        Whole stack: web + api + db (schema auto-applied).
 docs/
   architecture.docx/.pdf  Full architecture & build plan.
+  api-contract.md         Frozen REST contract between API and console.
   crawler-integration.md  Note on reusing the seo-repo crawler logic in recon.
   generate_architecture_docx.js
 .github/
@@ -78,7 +84,23 @@ CONTRIBUTING.md           How we track and work on scope.
    pseudonymizes hosts and strips credentials and payloads.
 7. **Hardened XML parsing** (`defusedxml`) for all scanner output (XXE-safe).
 
-## Getting started (dev)
+## Getting started
+
+### Docker (whole stack, recommended)
+
+```bash
+docker compose up --build
+#  web : Vulnerability Console (nginx)  -> http://localhost:8137
+#  api : read-only FastAPI (seed-backed) -> http://localhost:8138
+#  db  : Postgres 16, schema.sql applied -> localhost:5432
+```
+
+The console (8137) talks to the API (8138); both ports are published to the
+host so the browser reaches each directly (CORS is scoped to the console
+origin). The API serves seed data today; `db` provisions and validates the
+schema for the next phase.
+
+### Manual (dev)
 
 ```bash
 # 1. Provision the schema
@@ -88,10 +110,13 @@ psql -f db/schema.sql
 pip install -r orchestrator/requirements.txt
 python orchestrator/worker.py            # needs a Temporal cluster
 
-# 3. Web console (Vulnerability Console UI)
+# 3. Console API (read-only)
+uvicorn orchestrator.api.main:app --port 8138
+
+# 4. Web console (Vulnerability Console UI)
 cd frontend && python -m http.server 8137   # open http://localhost:8137
 
-# 4. Regenerate the architecture doc (optional)
+# 5. Regenerate the architecture doc (optional)
 npm install
 node docs/generate_architecture_docx.js
 ```

@@ -43,6 +43,12 @@ Keep it honest: check a box only when the exit criteria are met and verified.
 - [~] Human-review UI: validate / confirm-FP
       (console scaffold built in `frontend/`; not yet wired to mutate state)
 
+## Packaging & deployment
+- [x] Dockerized stack: `docker compose up` → web (nginx) + api (uvicorn) + db
+      (Postgres 16, schema auto-applied). CI builds + smoke-tests the images.
+- [ ] Production hardening: non-root images, pinned digests, secrets via vault,
+      reverse proxy / TLS, healthchecks on api + web.
+
 ## UI — Vulnerability Console (`frontend/`)  `spans phases 1–4`
 **Exit:** each screen is wired to the API and replaces its mock data source.
 

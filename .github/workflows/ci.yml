@@ -125,3 +125,28 @@ jobs:
           node-version: "20"
       - run: npm install --no-save @babel/standalone
       - run: node frontend/verify-jsx.js
+
+  # ------------------------------------------------------------------
+  # Docker: the stack images must build and the compose file be valid.
+  # ------------------------------------------------------------------
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate compose file
+        run: docker compose config --quiet
+      - name: Build api + web images
+        run: docker compose build api web
+
+      # Boot the stack and smoke-test the published endpoints.
+      - name: Up and smoke-test
+        run: |
+          docker compose up -d
+          for i in $(seq 1 20); do
+            curl -sf http://localhost:8138/api/health && break || sleep 2
+          done
+          curl -sf http://localhost:8138/api/health | grep -q '"status":"ok"'
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8137/)" = "200"
+          curl -s http://localhost:8138/api/findings | grep -q '"total"'
+          docker compose down

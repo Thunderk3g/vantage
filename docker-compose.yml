@@ -1,0 +1,48 @@
+# Vantage — local stack.
+#   web  : the Vulnerability Console (static, nginx)        -> http://localhost:8137
+#   api  : the read-only FastAPI service (seed-backed)      -> http://localhost:8138
+#   db   : Postgres 16 with db/schema.sql auto-applied       -> localhost:5432
+#
+# The api currently serves seed data; db is provisioned (and the schema is
+# validated on init) ready for the next phase when the API moves off the seed.
+#
+# Run:  docker compose up --build
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: vantage
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - vantage-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d vantage"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./orchestrator
+      dockerfile: Dockerfile
+    ports:
+      - "8138:8138"
+    environment:
+      PYTHONUNBUFFERED: "1"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "8137:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  vantage-db:
