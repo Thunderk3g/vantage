@@ -15,7 +15,26 @@
   }
 
   function Findings({ initial, go }) {
-    const F = window.FINDINGS;
+    // Fetch findings via the API (falls back to window.FINDINGS offline).
+    const { data, loading } = window.useAsync(() => window.api.findings(), []);
+    if (loading && !data) {
+      return (
+        <div>
+          <div className="page-head">
+            <div>
+              <div className="page-title-row"><h1 className="t-h1">Findings</h1></div>
+              <div className="page-sub">Triage, assign, and track remediation across the approved asset inventory.</div>
+            </div>
+          </div>
+          <div className="card"><Empty icon={Icon.search} title="Loading findings…">Fetching the latest findings from the scanner.</Empty></div>
+        </div>
+      );
+    }
+    return <FindingsView findings={(data && data.findings) || window.FINDINGS} initial={initial} go={go} />;
+  }
+
+  function FindingsView({ findings, initial, go }) {
+    const F = findings;
     const [q, setQ] = useState("");
     const [sev, setSev] = useState(initial && initial.severity ? [initial.severity] : []);
     const [status, setStatus] = useState([]);

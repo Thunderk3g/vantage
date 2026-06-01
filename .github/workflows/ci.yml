@@ -29,7 +29,8 @@ jobs:
           python -m py_compile \
             shared.py workflows.py activities.py worker.py \
             adapters/base.py adapters/nmap_adapter.py adapters/nessus_adapter.py \
-            adapters/burp_adapter.py adapters/nikto_adapter.py
+            adapters/burp_adapter.py adapters/nikto_adapter.py \
+            api/__init__.py api/seed.py api/main.py
       - name: Guard — no exploitation phase may be introduced
         run: |
           if grep -rniE "phase\s*=\s*['\"]?(exploit|post_exploit|lateral|remediate)" orchestrator db; then

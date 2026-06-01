@@ -5,6 +5,10 @@ psycopg[binary]>=3.2        # Postgres driver
 hvac>=2.3                   # HashiCorp Vault client (or CyberArk SDK)
 pynacl>=1.5                 # Ed25519 signing of scope-authorization tokens
 
+# Read-only console API
+fastapi>=0.110             # read-only REST API for the Vantage console
+uvicorn[standard]>=0.29    # ASGI server (uvicorn orchestrator.api.main:app)
+
 # Reporting
 openpyxl>=3.1              # xlsx
 python-docx>=1.1          # docx

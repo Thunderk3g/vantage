@@ -48,7 +48,9 @@ Keep it honest: check a box only when the exit criteria are met and verified.
 
 - [x] Console scaffold: shell, nav, role switcher, design system, tweaks
 - [x] All 8 screens laid out on mock data (`data.js`), SLA reconciled to backend
-- [ ] Dashboard / Findings wired to `GET /findings`, `/scans`
+- [x] Read-only API (`orchestrator/api/`, FastAPI) per `docs/api-contract.md`
+- [x] Dashboard + Findings wired to `GET /api/findings` (graceful offline fallback)
+- [ ] Remaining screens (detail, SLA, exceptions, reports, scan) wired to API
 - [ ] Finding detail status workflow → API mutations (human-gated)
 - [ ] Start-a-scan posts to the scope gate (approved inventory only)
 - [ ] Reports screen triggers real export (incl. dual-password PDF step)

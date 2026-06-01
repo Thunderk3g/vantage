@@ -15,7 +15,27 @@
   }
 
   function Dashboard({ role, go }) {
-    const F = window.FINDINGS;
+    // Fetch findings via the API (falls back to window.FINDINGS offline).
+    // Rollups are computed locally from this array so numbers match exactly.
+    const { data, loading } = window.useAsync(() => window.api.findings(), []);
+    if (loading && !data) {
+      return (
+        <div>
+          <div className="page-head">
+            <div>
+              <div className="page-title-row"><h1 className="t-h1">Security posture</h1></div>
+              <div className="page-sub">Loading the latest security posture…</div>
+            </div>
+          </div>
+          <div className="card"><div className="card-pad" style={{ textAlign: "center", color: "var(--ink-3)", padding: "48px 0" }}>Loading…</div></div>
+        </div>
+      );
+    }
+    return <DashboardView findings={(data && data.findings) || window.FINDINGS} role={role} go={go} />;
+  }
+
+  function DashboardView({ findings, role, go }) {
+    const F = findings;
     const open = useMemo(() => F.filter(f => !f.isClosed), [F]);
     const counts = window.countBy(open, "severity");
     const overdue = open.filter(f => f.daysLeft != null && f.daysLeft < 0)
