@@ -33,7 +33,10 @@ jobs:
             api/__init__.py api/seed.py api/main.py api/db.py \
             triage/__init__.py triage/maps.py triage/engine.py \
             reporting/__init__.py reporting/export.py \
-            normalization.py
+            normalization.py pipeline.py
+      - name: Scope-boundary invariants (the scan-and-report guarantee, as a test)
+        working-directory: orchestrator
+        run: python test_scope_invariants.py
       - name: Adapter parser tests (real tool-output fixtures; defusedxml)
         working-directory: orchestrator
         run: |
@@ -46,6 +49,9 @@ jobs:
       - name: Normalization + triage wiring test (stdlib only)
         working-directory: orchestrator
         run: python test_normalization.py
+      - name: End-to-end pipeline test (fixtures -> adapters -> normalize -> triage)
+        working-directory: orchestrator
+        run: python test_pipeline_e2e.py
       - name: Reporting engine unit test
         run: |
           pip install openpyxl python-docx reportlab pikepdf

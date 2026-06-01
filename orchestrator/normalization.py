@@ -26,8 +26,26 @@ caller's input findings (``to_dict`` always returns a fresh dict).
 from __future__ import annotations
 
 import dataclasses
+import enum
 
 from triage.engine import run_triage
+
+
+def _coerce_enum(value):
+    """Replace any ``enum.Enum`` with its ``.value``; recurse into lists.
+
+    ``dataclasses.asdict`` leaves ``str, Enum`` members (e.g. ``Severity.HIGH``)
+    as enum instances, and ``str(member)`` yields ``"Severity.HIGH"`` — which
+    the triage engine's band normalizer cannot map, silently collapsing the
+    finding to 'info'. Unwrapping the member to its scalar value
+    (``Severity.HIGH`` -> ``"High"``, ``AuthContextName.MIN_PRIV`` ->
+    ``"min_priv"``) makes the engine receive the value it expects.
+    """
+    if isinstance(value, enum.Enum):
+        return value.value
+    if isinstance(value, list):
+        return [_coerce_enum(v) for v in value]
+    return value
 
 
 def to_dict(finding) -> dict:
@@ -38,13 +56,20 @@ def to_dict(finding) -> dict:
     also unwraps nested dataclasses); dicts are shallow-copied so callers never
     have their input mutated downstream. Any other mapping-like value is coerced
     via ``dict(...)``.
+
+    Enum-valued fields (and enum members inside list-valued fields) are coerced
+    to their scalar ``.value`` so the downstream triage engine receives e.g.
+    ``"High"`` rather than the ``Severity.HIGH`` enum member. The conversion is
+    pure — the input finding is never mutated.
     """
     if dataclasses.is_dataclass(finding) and not isinstance(finding, type):
-        return dataclasses.asdict(finding)
-    if isinstance(finding, dict):
-        return dict(finding)
-    # Last resort: anything dict()-able (e.g. another mapping type).
-    return dict(finding)
+        d = dataclasses.asdict(finding)
+    elif isinstance(finding, dict):
+        d = dict(finding)
+    else:
+        # Last resort: anything dict()-able (e.g. another mapping type).
+        d = dict(finding)
+    return {k: _coerce_enum(v) for k, v in d.items()}
 
 
 def merge_tool_findings(raw_by_tool: dict[str, list]) -> list[dict]:

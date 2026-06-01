@@ -11,9 +11,13 @@ Keep it honest: check a box only when the exit criteria are met and verified.
 ## Guardrails (apply to every phase — never descoped)
 
 - [x] Scan-and-report only; **no** exploitation / lateral movement / auto-fix.
+      Enforced as an **executable test** (`orchestrator/test_scope_invariants.py`,
+      run in CI): the `Phase` enum, adapter method surface, and activity verbs are
+      asserted to contain no exploit/lateral/remediate vocabulary.
 - [x] Scope gate enforced at every stage (HOD-approved inventory; fail closed).
 - [x] Human-gated validation and manual PT remain downstream.
-- [x] All XML parsed with `defusedxml`; secrets only from the vault.
+- [x] All XML parsed with `defusedxml`; secrets only from the vault (the
+      defusedxml/XXE guard is asserted in `test_scope_invariants.py` too).
 
 ---
 
@@ -39,12 +43,15 @@ Keep it honest: check a box only when the exit criteria are met and verified.
       messy XML + unit-tested against a real `nmap -oX` fixture
 - [x] Nessus adapter (VA + CIS) with hardened parsing — CVSS→band + CVE/compliance
       extraction unit-tested against a real `.nessus` v2 fixture
-- [ ] Normalization engine (raw → `CanonicalFinding`)
+- [x] Normalization engine (raw → `CanonicalFinding`): `normalization.py` bridges
+      adapter dataclass output → engine dicts (enum→value coercion at the seam)
 - [x] Deterministic triage engine (`orchestrator/triage/`): dedup + CVSS→severity
       + SLA + OWASP/SANS/CIS mapping tables (unit-tested)
-- [x] Triage wired into the pipeline via `orchestrator/normalization.py` (raw
-      multi-tool → merge → triage) + `activities.normalize_and_triage`; unit-tested
-      (raw adapter source still stubbed pending persisted scan output)
+- [x] **End-to-end pipeline** (`orchestrator/pipeline.py`): real sample artifacts →
+      adapters.parse() → normalize → triage → triaged register; covered by
+      `test_pipeline_e2e.py` (severity bands, SLA, taxonomy, cross-tool dedup).
+      `activities._load_raw_findings_by_tool` now feeds the demo register
+      (real source still pending persisted scan output)
 - [x] Excel report export (`orchestrator/reporting/`: xlsx/docx/dual-password PDF
       engine, unit-tested; not yet wired to an API endpoint/screen)
 - [x] Human-review UI: validate via the write path (status workflow)
