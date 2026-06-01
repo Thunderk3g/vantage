@@ -47,6 +47,34 @@
     return res.json();
   }
 
+  // Mutating request. Unlike reads, writes do NOT fall back to mock — a failed
+  // write must surface so the UI never fakes success. Throws an Error carrying
+  // .status and .data (the parsed JSON error body, when present).
+  async function sendJSON(path, body, method) {
+    let res;
+    try {
+      res = await fetch(window.API_BASE + path, {
+        method: method || "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(body || {}),
+      });
+    } catch (e) {
+      const err = new Error("Network error — the API is unreachable.");
+      err.status = 0;
+      throw err;
+    }
+    let data = null;
+    try { data = await res.json(); } catch (e) { /* empty/non-JSON body */ }
+    if (!res.ok) {
+      const msg = (data && (data.detail || data.error || data.message)) || ("HTTP " + res.status);
+      const err = new Error(msg);
+      err.status = res.status;
+      err.data = data;
+      throw err;
+    }
+    return data;
+  }
+
   function buildQuery(params) {
     if (!params) return "";
     const usp = new URLSearchParams();
@@ -141,6 +169,31 @@
         warnOnce("GET /api/health", err);
         return { status: "offline", today: "2026-06-01" };
       }
+    },
+
+    // ---- Writes (human-gated; throw on failure, NO silent fallback) --------
+    // PATCH a finding's status. Returns the updated (hydrated) finding.
+    setFindingStatus(id, body) {
+      return sendJSON("/api/findings/" + encodeURIComponent(id) + "/status", body, "PATCH")
+        .then(function (d) { return hydrateFinding(d && d.finding); });
+    },
+    // POST a new scan. The server enforces the scope gate (approved inventory).
+    // On out-of-scope/invalid input the thrown Error carries .status (403/422)
+    // and .data ({error, detail}). Returns the created scan on success.
+    startScan(body) {
+      return sendJSON("/api/scans", body, "POST").then(function (d) { return d && d.scan; });
+    },
+    // POST an exception request. Server resolves the approver tier from
+    // duration. Returns { exception, tier }.
+    requestException(body) {
+      return sendJSON("/api/exceptions", body, "POST");
+    },
+    // Recent audit-trail entries (read; falls back to [] offline).
+    async audit(limit) {
+      try {
+        const d = await getJSON("/api/audit" + (limit ? "?limit=" + limit : ""));
+        return d.audit || [];
+      } catch (err) { warnOnce("GET /api/audit", err); return []; }
     },
   };
 

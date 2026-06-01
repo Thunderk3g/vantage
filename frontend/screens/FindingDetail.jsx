@@ -29,10 +29,40 @@
     return <FindingDetailView finding={finding} id={id} go={go} role={role} />;
   }
 
+  const ACTOR = "A. Mehta"; // TODO: real user from auth
+
   function FindingDetailView({ finding, id, go, role }) {
     const f = finding || window.FINDINGS[0];
+    // `status` is the committed/displayed status; `pick` is the user's candidate
+    // selection in the stepper. Nothing mutates until they deliberately Save.
     const [status, setStatus] = useState(f.status);
+    const [pick, setPick] = useState(f.status);
+    const [saving, setSaving] = useState(false);
+    const [saveErr, setSaveErr] = useState(null);
+    const [saved, setSaved] = useState(false);
+    const [validatedBy, setValidatedBy] = useState(f.humanValidatedBy || null);
+    const [validatedAt, setValidatedAt] = useState(f.humanValidatedAt ? new Date(f.humanValidatedAt) : null);
     const [note, setNote] = useState("");
+
+    function saveStatus() {
+      if (saving || pick === status) return; // deliberate, no-op when unchanged
+      setSaving(true);
+      setSaveErr(null);
+      setSaved(false);
+      window.api.setFindingStatus(f.id, { status: pick, actor: ACTOR, note: note.trim() ? note.trim() : undefined })
+        .then(updated => {
+          setStatus(updated.status);
+          setPick(updated.status);
+          if (updated.humanValidatedBy) setValidatedBy(updated.humanValidatedBy);
+          if (updated.humanValidatedAt) setValidatedAt(new Date(updated.humanValidatedAt));
+          setSaved(true);
+        })
+        .catch(err => {
+          // Never fake success: keep the displayed status, surface the message.
+          setSaveErr(err && err.message ? err.message : "Failed to update status.");
+        })
+        .finally(() => setSaving(false));
+    }
 
     const evidence = `POST /v1/claims/4821 HTTP/2
 Host: api.claims.lifeco.internal
@@ -74,17 +104,33 @@ Authorization: Bearer <policyholder-A token>
               <div className="card-pad">
                 <div className="seg" style={{ width: "100%" }}>
                   {FLOW.map(s => (
-                    <button key={s} className={status === s ? "active" : ""} style={{ flex: 1 }} onClick={() => setStatus(s)}>{window.STATUS_LABEL[s]}</button>
+                    <button key={s} className={pick === s ? "active" : ""} style={{ flex: 1 }} disabled={saving} onClick={() => { setPick(s); setSaveErr(null); setSaved(false); }}>{window.STATUS_LABEL[s]}</button>
                   ))}
                 </div>
                 <div className="row gap3 mt4 wrap">
-                  <button className="btn sm"><Icon.user size={14} /> Reassign</button>
-                  <button className="btn sm" onClick={() => go("exception", { finding: f.id })}><Icon.exception size={14} /> Request exception</button>
-                  <button className="btn sm"><Icon.history size={14} /> Request retest</button>
+                  <button className="btn sm" disabled={saving}><Icon.user size={14} /> Reassign</button>
+                  <button className="btn sm" disabled={saving} onClick={() => go("exception", { finding: f.id })}><Icon.exception size={14} /> Request exception</button>
+                  <button className="btn sm" disabled={saving}><Icon.history size={14} /> Request retest</button>
                   <div className="spacer" />
-                  {status === "closed" ? <span className="status closed"><span className="sdot" />Verified closed</span> :
-                    <button className="btn primary sm"><Icon.check size={14} /> Save status</button>}
+                  <button className="btn primary sm" disabled={saving || pick === status} onClick={saveStatus}>
+                    {saving ? <span><Icon.scan size={14} /> Saving…</span> : <span><Icon.check size={14} /> Save status</span>}
+                  </button>
                 </div>
+                {saved && !saveErr && (
+                  <div className="row gap2 mt3 t-sm" style={{ color: "var(--success, var(--ok, #16a34a))", fontWeight: 500 }}>
+                    <Icon.check size={14} /> Status saved — now {window.STATUS_LABEL[status]}.
+                  </div>
+                )}
+                {saveErr && (
+                  <div className="mt3 t-sm" style={{ color: "var(--danger)", background: "var(--danger-soft, rgba(220,38,38,0.08))", border: "1px solid var(--danger)", borderRadius: "var(--r-md)", padding: "8px 12px", fontWeight: 500 }}>
+                    {saveErr}
+                  </div>
+                )}
+                {(validatedBy || validatedAt) && (
+                  <div className="t-xs faint mt3">
+                    Human-validated{validatedBy ? " by " + validatedBy : ""}{validatedAt ? " · " + window.fmtDate(validatedAt) : ""}
+                  </div>
+                )}
               </div>
             </div>
 

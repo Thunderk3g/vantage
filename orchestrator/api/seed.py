@@ -143,6 +143,9 @@ def _derive_findings():
             "escStage": esc_stage,
             "owner": owner,
             "scan": "SCAN-0" + str(98 - (i % 6)),
+            # ---- human-gating fields (v0.1) ----
+            "humanValidatedBy": None,
+            "humanValidatedAt": None,
         })
     return out
 
@@ -174,6 +177,148 @@ _TREND = [
     {"wk": "May 18", "critical": 5, "high": 9,  "medium": 15, "low": 7},
     {"wk": "May 25", "critical": 4, "high": 9,  "medium": 14, "low": 6},
 ]
+
+
+# ---- In-memory audit log (v0.1). Simplified mirror of audit_log table. ----
+# Each entry: {seq, ts, actor, action, entityType, entityId, summary}.
+_AUDIT: list[dict] = []
+_AUDIT_SEQ = 0
+
+
+def _now_ts() -> str:
+    """Wall-clock timestamp for audit/scan rows ('YYYY-MM-DD HH:MM')."""
+    return datetime.now().strftime("%Y-%m-%d %H:%M")
+
+
+def record_audit(actor: str, action: str, entity_type: str, entity_id: str, summary: str) -> dict:
+    """Append an audit entry with an incrementing seq; returns the entry."""
+    global _AUDIT_SEQ
+    _AUDIT_SEQ += 1
+    entry = {
+        "seq": _AUDIT_SEQ,
+        "ts": _now_ts(),
+        "actor": actor,
+        "action": action,
+        "entityType": entity_type,
+        "entityId": entity_id,
+        "summary": summary,
+    }
+    _AUDIT.append(entry)
+    return entry
+
+
+def audit(limit: Optional[int] = None) -> list[dict]:
+    """Return audit entries most-recent first (optionally capped to ``limit``)."""
+    rows = sorted(_AUDIT, key=lambda e: e["seq"], reverse=True)
+    if limit is not None:
+        rows = rows[:limit]
+    return [dict(e) for e in rows]
+
+
+def asset_by_id(asset_id: str) -> Optional[dict]:
+    """Look up an asset in the approved inventory (None if not approved)."""
+    a = _ASSET_BY_ID.get(asset_id)
+    return dict(a) if a is not None else None
+
+
+def find_finding(finding_id: str) -> Optional[dict]:
+    """Return the LIVE finding dict (mutable) or None. For writers only."""
+    for f in _FINDINGS:
+        if f["id"] == finding_id:
+            return f
+    return None
+
+
+def update_finding_status(finding_id: str, status: str, actor: str, validated_at: str) -> Optional[dict]:
+    """Mutate the underlying finding so subsequent reads reflect it. Returns a copy."""
+    f = find_finding(finding_id)
+    if f is None:
+        return None
+    f["status"] = status
+    f["isClosed"] = status in ("closed", "risk_accepted")
+    f["humanValidatedBy"] = actor
+    f["humanValidatedAt"] = validated_at
+    return dict(f)
+
+
+def _next_scan_id() -> str:
+    """Next SCAN-#### id (4-digit zero-padded) after the current max."""
+    mx = 0
+    for s in _SCANS:
+        try:
+            n = int(str(s["id"]).split("-", 1)[1])
+        except (IndexError, ValueError):
+            continue
+        mx = max(mx, n)
+    return f"SCAN-{mx + 1:04d}"
+
+
+def add_scan(asset: dict, pipeline: str, mode: str, auth_context: Optional[str], by: str) -> dict:
+    """Append a new queued scan to the underlying store; returns a copy."""
+    scan = {
+        "id": _next_scan_id(),
+        "target": asset["name"],
+        "pipeline": pipeline,
+        "type": mode,
+        "auth": auth_context if auth_context else "—",
+        "status": "queued",
+        "progress": 0,
+        "started": _now_ts(),
+        "findings": 0,
+        "by": by,
+    }
+    _SCANS.append(scan)
+    return dict(scan)
+
+
+# Full-name approver per exception tier (mirrors seed exception rows).
+_TIER_APPROVER = {
+    "CISO": "CISO",
+    "RMC": "Risk Mgmt Committee",
+    "Board": "Board Risk Committee",
+}
+
+
+def tier_for_duration(duration_months: int) -> str:
+    """Resolve approval tier from duration (mirrors DB CHECK)."""
+    if duration_months <= 3:
+        return "CISO"
+    if duration_months <= 12:
+        return "RMC"
+    return "Board"
+
+
+def _next_exception_id() -> str:
+    """Next EXC-### id (3-digit zero-padded) after the current max."""
+    mx = 0
+    for e in _EXCEPTIONS:
+        try:
+            n = int(str(e["id"]).split("-", 1)[1])
+        except (IndexError, ValueError):
+            continue
+        mx = max(mx, n)
+    return f"EXC-{mx + 1:03d}"
+
+
+def add_exception(finding: dict, requested_by: str, duration_months: int, documented_risk: str) -> tuple[dict, str]:
+    """Append a new requested exception; returns (copy, tier)."""
+    tier = tier_for_duration(duration_months)
+    exc = {
+        "id": _next_exception_id(),
+        "finding": finding["id"],
+        "title": finding["title"],
+        "asset": finding["asset"],
+        "severity": finding["severity"],
+        "duration": duration_months,
+        "tier": tier,
+        "status": "requested",
+        "requestedBy": requested_by,
+        "approver": _TIER_APPROVER[tier],
+        "reviewDate": "—",
+        "reason": documented_risk,
+    }
+    _EXCEPTIONS.append(exc)
+    return dict(exc), tier
 
 
 def findings():

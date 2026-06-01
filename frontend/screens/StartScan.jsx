@@ -51,22 +51,58 @@
   }
 
   function StartScanView({ assets: ASSETS, go }) {
+    const BY = "A. Mehta"; // TODO: real user from auth
     const [target, setTarget] = useState(null);
     const [pipeline, setPipeline] = useState("web");
     const [type, setType] = useState("gray-box");
     const [auth, setAuth] = useState("min-privilege");
-    const [submitted, setSubmitted] = useState(false);
+    const [pending, setPending] = useState(false);   // request in flight
+    const [created, setCreated] = useState(null);     // the queued scan on success
+    const [err, setErr] = useState(null);             // { message, status } on failure
 
     const assets = ASSETS.filter(a => pipeline === "web" ? a.type === "web" : a.type === "infra");
     const sel = ASSETS.find(a => a.id === target);
 
-    if (submitted) {
+    function reset() {
+      // Configure another: keep config, clear result/error state.
+      setCreated(null);
+      setErr(null);
+    }
+
+    function submit() {
+      if (!target || pending) return;
+      setPending(true);
+      setErr(null);
+      // SCOPE GATE: server validates the target is in the approved inventory.
+      window.api.startScan({
+        assetId: target,
+        pipeline: pipeline,
+        mode: type,
+        authContext: type === "gray-box" ? auth : undefined,
+        by: BY,
+      }).then(function (scan) {
+        setCreated(scan);
+      }).catch(function (e) {
+        setErr({ message: (e && e.message) || "The scan could not be queued.", status: e && e.status });
+      }).then(function () {
+        setPending(false);
+      });
+    }
+
+    if (created) {
       return (
         <div className="content-narrow" style={{ margin: "0 auto" }}>
           <div className="card card-pad center col gap4" style={{ padding: 56, textAlign: "center" }}>
             <span className="center" style={{ width: 56, height: 56, borderRadius: 14, background: "var(--ok-bg)", color: "var(--ok)" }}><Icon.check size={28} strokeWidth={2.5} /></span>
-            <div><h2 className="t-h1">Scan queued</h2><p className="page-sub">SCAN-0099 · {sel.name} · {type} · {pipeline === "web" ? "Web Application" : "Infrastructure"}{type === "gray-box" ? " · " + auth : ""}</p></div>
-            <div className="row gap3"><button className="btn" onClick={() => go("dashboard")}>Back to dashboard</button><button className="btn primary" onClick={() => setSubmitted(false)}>Configure another</button></div>
+            <div>
+              <h2 className="t-h1">Scan {created.id} queued for {created.target}</h2>
+              <p className="page-sub">{(sel && sel.name) || created.target} · {type} · {pipeline === "web" ? "Web Application" : "Infrastructure"}{type === "gray-box" ? " · " + auth : ""} · status {created.status || "queued"}</p>
+            </div>
+            <div className="row gap3">
+              <button className="btn primary" onClick={() => go("dashboard")}><Icon.play size={14} /> View scan</button>
+              <button className="btn" onClick={reset}>Start another</button>
+              <button className="btn" onClick={() => go("dashboard")}>Back to dashboard</button>
+            </div>
           </div>
         </div>
       );
@@ -137,6 +173,34 @@
           )}
         </div>
 
+        {/* Error banner — server scope-gate refusal (403) or validation/other failure */}
+        {err && (
+          <div className="card card-pad mt5 row gap3" style={{
+            alignItems: "flex-start",
+            borderColor: "var(--danger)",
+            background: "var(--danger-bg, var(--err-bg, var(--accent-soft)))",
+          }}>
+            <span style={{ color: "var(--danger)", marginTop: 1, flexShrink: 0 }}>
+              {err.status === 403 ? <Icon.lock size={18} /> : <Icon.alert size={18} />}
+            </span>
+            <div className="col gap1">
+              <span className="t-sm" style={{ fontWeight: 700, color: "var(--danger)" }}>
+                {err.status === 403
+                  ? "Refused: target rejected by the scope gate"
+                  : err.status === 422
+                    ? "Scan request invalid"
+                    : "Scan could not be queued"}
+              </span>
+              <span className="t-sm">
+                {err.status === 403 ? "Refused: " : ""}{err.message}
+              </span>
+              {err.status === 403 && (
+                <span className="t-xs faint">Only assets in the approved inventory can be scanned. Submit this target for approval first.</span>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Sticky summary footer */}
         <div className="card card-pad mt5 row between" style={{ position: "sticky", bottom: 0 }}>
           <div className="row gap3 wrap t-sm">
@@ -147,8 +211,10 @@
             {type === "gray-box" && <span className="chip">{auth}</span>}
           </div>
           <div className="row gap3">
-            <button className="btn" onClick={() => go("dashboard")}>Cancel</button>
-            <button className="btn primary" disabled={!target} onClick={() => setSubmitted(true)}><Icon.play size={14} /> Queue scan</button>
+            <button className="btn" disabled={pending} onClick={() => go("dashboard")}>Cancel</button>
+            <button className="btn primary" disabled={!target || pending} onClick={submit}>
+              {pending ? <><Icon.shield size={14} /> Queueing…</> : <><Icon.play size={14} /> Queue scan</>}
+            </button>
           </div>
         </div>
       </div>

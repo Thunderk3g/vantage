@@ -58,10 +58,16 @@ Keep it honest: check a box only when the exit criteria are met and verified.
 - [x] Dashboard + Findings wired to `GET /api/findings` (graceful offline fallback)
 - [x] All 8 screens read-wired to the API (detail, SLA, exceptions, reports, scan)
       with loading states + offline fallback
-- [ ] Finding detail status workflow → API mutations (human-gated)  ← writes next
-- [ ] Start-a-scan posts to the scope gate (approved inventory only)
+- [x] **Write path (human-gated)** — `PATCH /api/findings/{id}/status`,
+      `POST /api/scans` (server-side scope gate, fail-closed 403 out-of-scope),
+      `POST /api/exceptions` (duration→tier), `GET /api/audit`. Every mutation
+      requires a human actor and is audited; writes throw (no faked success).
+- [x] Finding detail status workflow → API mutations (human-gated)
+- [x] Start-a-scan posts to the scope gate (approved inventory only)
+- [ ] Exception/finding writes persist to Postgres (currently in-memory store)
+- [ ] FP confirm/clear workflow + risk-acceptance via approved exception
 - [ ] Reports screen triggers real export (incl. dual-password PDF step)
-- [ ] Auth/RBAC: real role from SSO replaces the role switcher
+- [ ] Auth/RBAC: real `actor` from SSO replaces the `"A. Mehta"` placeholder
 
 ## Phase 2 — Web MVP  `target: 3–4 wks`
 **Exit:** web pipeline parity.

@@ -96,3 +96,58 @@ constants** and stay client-side in `data.js`. Everything else (findings,
 assets, scans, exceptions, trend) is fetched. The console must **degrade
 gracefully**: if the API is unreachable, fall back to the in-file mock data so
 the prototype still renders offline.
+
+---
+
+# Write endpoints (v0.1) — human-gated
+
+All mutations require a human `actor` (no anonymous/system writes). Every
+mutation appends an **audit entry** (and scope-gate denials are audited too).
+Writes are applied to the in-memory store so subsequent reads reflect them
+(persistence to Postgres is a later slice). Error bodies are
+`{ "error": "<code>", "detail": "<human message>" }`; the client throws on any
+non-2xx (no silent fallback for writes).
+
+**Boundary:** none of these triggers exploitation or auto-remediation. No
+endpoint sets `risk_accepted` or auto-closes by time — `risk_accepted` is only
+reachable via an *approved* exception (out of scope for v0.1, so unreachable).
+
+### `PATCH /api/findings/{id}/status`
+Body: `{ "status": "open|triaged|in_progress|retest|closed", "actor": "<name>", "note"?: "<text>" }`
+- Allowed: any move within `open → triaged → in_progress → retest → closed`,
+  forward or backward (reopen). **Reject** `risk_accepted`/`confirmed_fp` here (422).
+- On success: set `status`, `humanValidatedBy = actor`, `humanValidatedAt = today`;
+  audit `FINDING_STATUS_CHANGED`. Returns `{ "finding": Finding }`.
+- Errors: 404 unknown id; 422 missing `actor` or disallowed `status`.
+- `Finding` gains two fields going forward: `humanValidatedBy` (nullable),
+  `humanValidatedAt` (ISO date, nullable) — included on all finding reads.
+
+### `POST /api/scans`  — SCOPE GATE (fail closed)
+Body: `{ "assetId": "AST-…", "pipeline": "web|infra", "mode": "black-box|gray-box", "authContext"?: "unauthenticated|min-privilege|max-privilege", "by": "<name>" }`
+- **Scope gate:** `assetId` MUST be in the approved inventory. Unknown or
+  non-approved → **403** `{ "error": "out_of_scope", "detail": "<id> is not in the approved asset inventory" }` (audited as `SCAN_DENIED_OUT_OF_SCOPE`).
+- `pipeline` must match the asset's type (web↔web, infra↔infra) → 422 if not.
+- `gray-box` requires `authContext` → 422 if missing. `by` required → 422.
+- On success (**201**): create `Scan` `{id:"SCAN-####", target:<asset name>,
+  pipeline, type:<mode>, auth:<authContext or "—">, status:"queued", progress:0,
+  started:"<now>", findings:0, by}`; audit `SCAN_REQUESTED`. Returns `{ "scan": Scan }`.
+
+### `POST /api/exceptions`
+Body: `{ "findingId": "VLN-…", "requestedBy": "<name>", "durationMonths": <int>, "documentedRisk": "<text>" }`
+- Tier resolved from duration (mirrors the DB CHECK): `≤3 → CISO`, `≤12 → RMC`,
+  `>12 → Board`.
+- `documentedRisk` required (422 if empty); `durationMonths > 0` (422); `findingId`
+  must exist (404).
+- On success (**201**): create an `Exception` `{id:"EXC-###", finding, title,
+  asset, severity, duration, tier, status:"requested", requestedBy,
+  approver:<tier full name>, reviewDate:"—", reason:<documentedRisk>}`; audit
+  `EXCEPTION_REQUESTED`. Returns `{ "exception": Exception, "tier": "<CISO|RMC|Board>" }`.
+
+### `GET /api/audit?limit=N`
+Returns `{ "audit": [ { "seq", "ts", "actor", "action", "entityType", "entityId", "summary" }, … ] }`, most-recent first. Simplified in-memory mirror of the
+hash-chained `audit_log` table.
+
+## Client write methods (`frontend/api.js`)
+`window.api.setFindingStatus(id, body)`, `.startScan(body)`,
+`.requestException(body)`, `.audit(limit)`. Write methods **throw** on failure
+(Error carries `.status` and `.data`); screens must show the error, not fake success.

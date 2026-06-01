@@ -43,14 +43,71 @@
     const [months, setMonths] = useState(2);
     const tier = tierFor(months);
 
+    // Local copy of the register so a successful request shows immediately.
+    const [rows, setRows] = useState(exceptions);
+    // The finding the request targets: fixed when launched from a finding,
+    // otherwise driven by the in-modal select. Default to the first option.
+    const initialFinding = initial && initial.finding ? initial.finding : "VLN-2044";
+    const [findingId, setFindingId] = useState(initialFinding);
+    const [risk, setRisk] = useState("");
+    const [pending, setPending] = useState(false);
+    const [error, setError] = useState(null);
+    const [result, setResult] = useState(null); // { exception, tier } from the server
+
+    const BY = "A. Mehta"; // TODO: real user from auth
+
+    function openForm() {
+      setError(null);
+      setResult(null);
+      setRisk("");
+      setFindingId(initialFinding);
+      setShowForm(true);
+    }
+    function closeForm() {
+      setShowForm(false);
+      setError(null);
+      setPending(false);
+    }
+
+    async function submit() {
+      if (pending) return;
+      setPending(true);
+      setError(null);
+      try {
+        const res = await window.api.requestException({
+          findingId: findingId,
+          requestedBy: BY,
+          durationMonths: months,
+          documentedRisk: risk,
+        });
+        // Server resolves the authoritative tier; prepend the created row.
+        setRows(prev => [res.exception, ...prev]);
+        setResult(res);
+        setShowForm(false);
+      } catch (err) {
+        setError(err && err.message ? err.message : "Request failed");
+      } finally {
+        setPending(false);
+      }
+    }
+
     return (
       <div>
         <div className="page-head"><div>
           <h1 className="t-h1">Exception management</h1>
           <div className="page-sub">Risk-accepted findings and time-boxed exceptions. Approval tier is set by requested duration.</div>
         </div><div className="spacer" />
-          <button className="btn primary" onClick={() => setShowForm(true)}><Icon.plus size={15} /> Request exception</button>
+          <button className="btn primary" onClick={openForm}><Icon.plus size={15} /> Request exception</button>
         </div>
+
+        {/* Server-confirmed request banner */}
+        {result && (
+          <div className="card card-pad row gap3 mb5" style={{ alignItems: "center", borderColor: "var(--accent-soft-border)", background: "var(--accent-soft)" }}>
+            <Icon.check size={18} />
+            <span className="t-sm flex1">Exception <b className="mono">{result.exception.id}</b> requested for <span className="mono">{result.exception.finding}</span> — routed to <b>{result.tier}</b> for approval.</span>
+            <button className="icon-btn" onClick={() => setResult(null)}><Icon.x size={16} /></button>
+          </div>
+        )}
 
         {/* Approval tiers */}
         <div className="grid mb5" style={{ gridTemplateColumns: "repeat(3,1fr)" }}>
@@ -59,20 +116,20 @@
               <div className="row between"><span className="t-h2">{t.tier}</span><span className="chip mono">{t.note}</span></div>
               <span className="t-sm faint">{t.who}</span>
               <div className="divider" style={{ margin: "8px 0" }} />
-              <span className="t-xs faint">{exceptions.filter(e => e.tier === t.tier).length} exception(s) at this tier</span>
+              <span className="t-xs faint">{rows.filter(e => e.tier === t.tier).length} exception(s) at this tier</span>
             </div>
           ))}
         </div>
 
         <div className="card">
-          <div className="card-head"><h3>Exception register</h3><div className="spacer" /><span className="t-xs faint">{exceptions.length} total</span></div>
+          <div className="card-head"><h3>Exception register</h3><div className="spacer" /><span className="t-xs faint">{rows.length} total</span></div>
           <div className="table-wrap">
             <table className="tbl">
               <thead><tr>
                 <th>Exception</th><th>Finding</th><th>Sev</th><th>Asset</th><th>Duration</th><th>Approval tier</th><th>Status</th><th>Review by</th>
               </tr></thead>
               <tbody>
-                {exceptions.map(e => (
+                {rows.map(e => (
                   <tr key={e.id} onClick={() => go("detail", { id: e.finding })}>
                     <td><div className="cell-strong mono">{e.id}</div><div className="cell-sub" style={{ maxWidth: 220 }}>{e.title}</div></td>
                     <td><span className="mono t-sm">{e.finding}</span></td>
@@ -92,16 +149,16 @@
         {/* Request form modal */}
         {showForm && (
           <>
-            <div className="scrim" onClick={() => setShowForm(false)} />
+            <div className="scrim" onClick={closeForm} />
             <div className="modal" style={{ width: 560 }}>
               <div className="modal-head">
                 <div className="flex1"><h3 className="t-h2" style={{ margin: 0 }}>Request exception</h3>
                   <div className="t-xs faint mt1">{initial && initial.finding ? `For finding ${initial.finding}` : "Select a finding to risk-accept or time-box."}</div></div>
-                <button className="icon-btn" onClick={() => setShowForm(false)}><Icon.x size={18} /></button>
+                <button className="icon-btn" onClick={closeForm}><Icon.x size={18} /></button>
               </div>
               <div className="modal-body col gap4">
                 {!(initial && initial.finding) && <div className="col gap2"><label className="t-label">Finding</label>
-                  <select className="select"><option>VLN-2044 — No MFA on underwriting admin console</option>{window.FINDINGS.slice(0, 8).map(f => <option key={f.id}>{f.id} — {f.title}</option>)}</select></div>}
+                  <select className="select" value={findingId} onChange={e => setFindingId(e.target.value)}><option value="VLN-2044">VLN-2044 — No MFA on underwriting admin console</option>{window.FINDINGS.slice(0, 8).map(f => <option key={f.id} value={f.id}>{f.id} — {f.title}</option>)}</select></div>}
 
                 <div className="col gap2">
                   <label className="t-label">Requested duration</label>
@@ -122,7 +179,7 @@
                 </div>
 
                 <div className="col gap2"><label className="t-label">Risk justification <span className="faint" style={{ textTransform: "none", letterSpacing: 0 }}>(required)</span></label>
-                  <textarea className="input" rows={3} placeholder="Business reason, compensating controls, and residual-risk assessment…" /></div>
+                  <textarea className="input" rows={3} value={risk} onChange={e => setRisk(e.target.value)} placeholder="Business reason, compensating controls, and residual-risk assessment…" /></div>
 
                 <div className="col gap2"><label className="t-label">Compensating controls</label>
                   <input className="input" placeholder="e.g. network segmentation, IP allow-listing, monitoring" /></div>
@@ -132,9 +189,17 @@
                   <div className="ph" style={{ flex: 1, height: 56, fontSize: 11 }}>attach owner sign-off</div>
                 </div>
               </div>
+              {error && (
+                <div className="modal-body" style={{ paddingTop: 0 }}>
+                  <div className="card card-pad row gap2" style={{ alignItems: "center", borderColor: "var(--danger-soft-border, var(--border))", background: "var(--danger-soft, var(--surface-2))", color: "var(--danger-text, var(--text))" }}>
+                    <Icon.alert size={16} />
+                    <span className="t-sm">{error}</span>
+                  </div>
+                </div>
+              )}
               <div className="modal-foot">
-                <button className="btn" onClick={() => setShowForm(false)}>Cancel</button>
-                <button className="btn primary" onClick={() => setShowForm(false)}>Submit to {tier}</button>
+                <button className="btn" onClick={closeForm} disabled={pending}>Cancel</button>
+                <button className="btn primary" onClick={submit} disabled={pending}>{pending ? "Submitting…" : `Submit to ${tier}`}</button>
               </div>
             </div>
           </>
