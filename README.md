@@ -43,14 +43,15 @@ are designed and scaffolded but not yet wired to live systems.
 |---|---|---|
 | Architecture & data model | ✅ Done | `docs/architecture.*`; reviewed end-to-end. |
 | Database schema (`db/schema.sql`) | ✅ Done | Applies on Postgres 16; SLA trigger, audit hash-chain, exception-routing CHECK all **verified** (and smoke-tested in CI + Docker). |
-| Console API (`orchestrator/api/`) | ✅ Done | FastAPI; reads **and human-gated writes** — finding status, scope-gated scans (fail-closed 403), exception requests, audit trail — per `docs/api-contract.md`. **In-memory store** (not the DB yet). |
+| Console API (`orchestrator/api/`) | ✅ Done | FastAPI; reads **and human-gated writes** — finding status, scope-gated scans (fail-closed 403), exception requests — per `docs/api-contract.md`. **Audit trail persists to the hash-chained Postgres `audit_log`**; finding/scan state is still in-memory. |
+| Triage engine (`orchestrator/triage/`) | ✅ Done (det.) | Deterministic dedup + CVSS→severity + SLA + OWASP/SANS/CIS mapping, unit-tested. LLM layer still designed; not yet wired into the pipeline. |
+| Reporting engine (`orchestrator/reporting/`) | ✅ Done | xlsx + docx + **dual-password PDF** (reportlab→pikepdf, AES-256), unit-tested. Not yet wired to an API endpoint/screen. |
 | Web console — 8 screens | ✅ Done | Built from the design handoff; all screens read-wired, plus **write flows** on Finding detail (status), Start-a-scan (scope gate), and Exceptions (request). Loading/error states + offline read fallback. |
 | Docker stack (web + api + db) | ✅ Done | `docker compose up`; CI builds + boots + smoke-tests it. |
 | Orchestrator workflows (Temporal) | 🟡 Skeleton | Phase gating + hard stop before exploitation are real; activities are `NotImplementedError` stubs. |
 | Scanner adapters | 🟡 Skeleton | Contracts + result parsers exist; engine calls + vault creds stubbed. |
-| Scope gate / scheduler | 🟡 Skeleton | Logic + DB ledger defined; inventory resolution + token signing stubbed. |
-| AI triage / LLM | ⬜ Designed | Deterministic-first + redacted batch design; not implemented. |
-| Reporting engine (xlsx/docx/2-pwd pdf) | ⬜ Designed | Stack chosen (openpyxl / python-docx / pikepdf); not implemented. |
+| Scope gate / scheduler | 🟡 Skeleton | API scope gate enforces approved-inventory on console scans; orchestrator-side inventory resolution + token signing still stubbed. |
+| AI triage — LLM layer | ⬜ Designed | Deterministic engine is done (above); the redacted-batch LLM pass is designed, not implemented. |
 | Auth / RBAC / SSO | ⬜ Designed | Console role switcher is a **mock**; no real authz yet. |
 | Secrets / vault | ⬜ Designed | CyberArk/Vault integration designed; not wired. |
 
@@ -60,19 +61,22 @@ Ordered roughly by dependency. Tracked live in **[ROADMAP.md](ROADMAP.md)**.
 
 1. ✅ **Write path (human-gated mutations).** *Done* — `PATCH` finding status,
    scope-gated `POST /api/scans` (fail-closed), `POST /api/exceptions` (tier
-   routing), and an audit trail. Every mutation needs a human `actor`.
-2. **API → real datastore.** Replace the API's in-memory store with `psycopg`
-   against the Postgres schema (already provisioned by Compose) so reads **and
-   writes** persist; mirror mutations into the hash-chained `audit_log` table.
-3. **Scope gate + scheduler (engine side).** Wire the orchestrator's own scope
-   gate (Ed25519 token signing via vault) and the scan cadence (internal/public
-   2×/yr, CIS 1×/yr) — the API's scope gate already guards console-initiated scans.
-4. **Scanner adapter bodies.** Wire Nmap / Nessus / Burp / Nikto (and the OSS
+   routing). Every mutation needs a human `actor`.
+2. 🟡 **Persistence.** *Audit trail done* — mutations persist to the hash-chained
+   Postgres `audit_log` (DB-backed with in-memory fallback). **Left:** persist the
+   finding/scan/exception *state* itself via `psycopg` against the schema (still
+   an in-memory store today).
+3. ✅ **Triage engine (deterministic).** *Done* (`orchestrator/triage/`) — dedup,
+   CVSS→severity, SLA, OWASP/SANS/CIS mapping, unit-tested. **Left:** wire it into
+   the pipeline activities + add the redacted **LLM** pass.
+4. ✅ **Reporting engine.** *Done* (`orchestrator/reporting/`) — xlsx/docx/
+   dual-password PDF, unit-tested. **Left:** expose `POST /api/reports` and wire
+   the Reports screen's generate flow.
+5. **Scanner adapter bodies.** Wire Nmap / Nessus / Burp / Nikto (and the OSS
    ZAP / Nuclei / Trivy variant) engine calls + least-privilege vault creds.
-5. **AI triage layer.** Redaction proxy + self-hosted LLM batch triage; reconcile
-   LLM output against the deterministic severity bands; low-confidence → human queue.
-6. **Reporting engine.** xlsx / docx / dual-password PDF export, wired to the
-   Reports screen's generate flow.
+6. **Scope gate + scheduler (engine side).** The orchestrator's own scope gate
+   (Ed25519 token signing via vault) and the scan cadence (internal/public 2×/yr,
+   CIS 1×/yr) — the API's scope gate already guards console-initiated scans.
 7. **Auth.** SSO + RBAC replacing the role switcher; per-role API authorization.
 8. **Hardening.** Non-root images, vault-sourced secrets, TLS/reverse proxy,
    pen-test of Vantage itself, ISO 27001 evidence pack.

@@ -38,10 +38,12 @@ Keep it honest: check a box only when the exit criteria are met and verified.
 - [x] Nmap adapter (safe NSE categories only)
 - [x] Nessus adapter (VA) with hardened parsing
 - [ ] Normalization engine (raw → `CanonicalFinding`)
-- [ ] Deterministic triage: dedup + CVSS→severity + SLA assignment
-- [ ] Excel report export
-- [~] Human-review UI: validate / confirm-FP
-      (console scaffold built in `frontend/`; not yet wired to mutate state)
+- [x] Deterministic triage engine (`orchestrator/triage/`): dedup + CVSS→severity
+      + SLA + OWASP/SANS/CIS mapping tables (unit-tested; not yet wired into the
+      pipeline activities)
+- [x] Excel report export (`orchestrator/reporting/`: xlsx/docx/dual-password PDF
+      engine, unit-tested; not yet wired to an API endpoint/screen)
+- [x] Human-review UI: validate via the write path (status workflow)
 
 ## Packaging & deployment
 - [x] Dockerized stack: `docker compose up` → web (nginx) + api (uvicorn) + db
@@ -64,9 +66,12 @@ Keep it honest: check a box only when the exit criteria are met and verified.
       requires a human actor and is audited; writes throw (no faked success).
 - [x] Finding detail status workflow → API mutations (human-gated)
 - [x] Start-a-scan posts to the scope gate (approved inventory only)
-- [ ] Exception/finding writes persist to Postgres (currently in-memory store)
+- [x] Audit trail persists to the hash-chained Postgres `audit_log` (DB-backed
+      via `DATABASE_URL`, with in-memory fallback; verified in the Docker stack)
+- [ ] Finding/scan/exception *state* persists to Postgres (still in-memory store)
 - [ ] FP confirm/clear workflow + risk-acceptance via approved exception
-- [ ] Reports screen triggers real export (incl. dual-password PDF step)
+- [ ] Reports screen triggers real export (wire `orchestrator/reporting/` to a
+      `POST /api/reports` + the screen's generate flow)
 - [ ] Auth/RBAC: real `actor` from SSO replaces the `"A. Mehta"` placeholder
 
 ## Phase 2 — Web MVP  `target: 3–4 wks`

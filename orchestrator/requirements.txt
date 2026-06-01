@@ -12,5 +12,5 @@ uvicorn[standard]>=0.29    # ASGI server (uvicorn orchestrator.api.main:app)
 # Reporting
 openpyxl>=3.1              # xlsx
 python-docx>=1.1          # docx
-weasyprint>=62            # html -> pdf
+reportlab>=4.0             # pure-Python PDF content (Windows-friendly; no system libs)
 pikepdf>=9                 # AES-256 dual-password PDF (user + owner password)

@@ -11,6 +11,8 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from typing import Optional
 
+from . import db
+
 # ---- "Today" pinned (data.js: new Date("2026-06-01T09:00:00")) ----
 # We only need the calendar date for ISO output and day-diff math.
 TODAY: date = date(2026, 6, 1)
@@ -179,10 +181,28 @@ _TREND = [
 ]
 
 
-# ---- In-memory audit log (v0.1). Simplified mirror of audit_log table. ----
-# Each entry: {seq, ts, actor, action, entityType, entityId, summary}.
+# ---- Audit log (v0.1). DB-backed when available; in-memory fallback. ----
+# Each in-memory entry mirrors the API shape:
+#   {seq, ts, actor, action, entityType, entityId, summary}.
+# When a Postgres DB is configured (db.py / DATABASE_URL), record_audit ALSO
+# INSERTs into the hash-chained, append-only ``audit_log`` table and GET /api/audit
+# reads back from it. The human entity id (e.g. "VLN-2074") and summary go into
+# the ``after`` JSONB — ``entity_id`` (a uuid column) is left NULL since our ids
+# are not uuids. The in-memory list is always kept as a fallback cache.
 _AUDIT: list[dict] = []
 _AUDIT_SEQ = 0
+
+# SQL helpers for the DB-backed path. psycopg is imported lazily inside db.py.
+import json as _json  # local alias; only used by the DB audit path
+
+_AUDIT_INSERT_SQL = (
+    "INSERT INTO audit_log (actor, action, entity_type, after) "
+    "VALUES (%s, %s, %s, %s::jsonb)"
+)
+_AUDIT_SELECT_SQL = (
+    "SELECT seq, ts, actor, action, entity_type, after "
+    "FROM audit_log ORDER BY seq DESC"
+)
 
 
 def _now_ts() -> str:
@@ -190,8 +210,79 @@ def _now_ts() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M")
 
 
+def _audit_db_insert(actor: str, action: str, entity_type: str,
+                     entity_id: str, summary: str) -> bool:
+    """INSERT one audit row into Postgres. Returns True on success, else False.
+
+    Never raises: any DB/driver error is swallowed so the API keeps serving via
+    the in-memory cache. The BEFORE INSERT trigger fills prev_hash/row_hash.
+    """
+    conn = db.get_conn()
+    if conn is None:
+        return False
+    try:
+        after = _json.dumps({"entityId": entity_id, "summary": summary})
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(_AUDIT_INSERT_SQL, (actor, action, entity_type, after))
+        return True
+    except Exception:
+        return False
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _audit_db_fetch(limit: Optional[int]) -> Optional[list[dict]]:
+    """Read audit rows from Postgres (most-recent first), mapped to API shape.
+
+    Returns the list on success, or ``None`` if the DB is unavailable / errors
+    (so the caller falls back to the in-memory list). Never raises.
+    """
+    conn = db.get_conn()
+    if conn is None:
+        return None
+    try:
+        sql = _AUDIT_SELECT_SQL
+        params: tuple = ()
+        if limit is not None:
+            sql += " LIMIT %s"
+            params = (limit,)
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+    except Exception:
+        return None
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    out: list[dict] = []
+    for seq, ts, actor, action, entity_type, after in rows:
+        after = after or {}
+        out.append({
+            "seq": seq,
+            "ts": ts.strftime("%Y-%m-%d %H:%M") if hasattr(ts, "strftime") else str(ts),
+            "actor": actor,
+            "action": action,
+            "entityType": entity_type,
+            "entityId": after.get("entityId"),
+            "summary": after.get("summary"),
+        })
+    return out
+
+
 def record_audit(actor: str, action: str, entity_type: str, entity_id: str, summary: str) -> dict:
-    """Append an audit entry with an incrementing seq; returns the entry."""
+    """Append an audit entry; persist to Postgres when available.
+
+    Always appends to the in-memory cache (fallback) and, when a DB is
+    configured/reachable, also INSERTs into the hash-chained ``audit_log`` table.
+    Returns the in-memory entry.
+    """
     global _AUDIT_SEQ
     _AUDIT_SEQ += 1
     entry = {
@@ -204,11 +295,18 @@ def record_audit(actor: str, action: str, entity_type: str, entity_id: str, summ
         "summary": summary,
     }
     _AUDIT.append(entry)
+    _audit_db_insert(actor, action, entity_type, entity_id, summary)
     return entry
 
 
 def audit(limit: Optional[int] = None) -> list[dict]:
-    """Return audit entries most-recent first (optionally capped to ``limit``)."""
+    """Return audit entries most-recent first (optionally capped to ``limit``).
+
+    Reads from Postgres when available; otherwise returns the in-memory list.
+    """
+    db_rows = _audit_db_fetch(limit)
+    if db_rows is not None:
+        return db_rows
     rows = sorted(_AUDIT, key=lambda e: e["seq"], reverse=True)
     if limit is not None:
         rows = rows[:limit]

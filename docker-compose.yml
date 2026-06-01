@@ -32,6 +32,10 @@ services:
       - "8138:8138"
     environment:
       PYTHONUNBUFFERED: "1"
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/vantage
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
 
   web:
