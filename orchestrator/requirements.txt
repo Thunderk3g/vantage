@@ -9,6 +9,12 @@ pynacl>=1.5                 # Ed25519 signing of scope-authorization tokens
 fastapi>=0.110             # read-only REST API for the Vantage console
 uvicorn[standard]>=0.29    # ASGI server (uvicorn orchestrator.api.main:app)
 
+# Auth / RBAC (AD/LDAP + OIDC) — see docs/auth-contract.md
+authlib>=1.3               # OIDC client: discovery, PKCE, id_token/JWKS validation
+httpx>=0.27               # token-endpoint exchange + JWKS fetch
+itsdangerous>=2.2         # signed session + OIDC-transaction cookies
+ldap3>=2.9                # AD group resolution (memberOf) when no groups claim
+
 # Reporting
 openpyxl>=3.1              # xlsx
 python-docx>=1.1          # docx

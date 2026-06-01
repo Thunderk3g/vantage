@@ -101,8 +101,19 @@ the prototype still renders offline.
 
 # Write endpoints (v0.1) — human-gated
 
-All mutations require a human `actor` (no anonymous/system writes). Every
-mutation appends an **audit entry** (and scope-gate denials are audited too).
+> **Auth update (v1, see `docs/auth-contract.md`).** Auth/RBAC is now wired.
+> All reads require an authenticated user (`/api/health` stays public);
+> mutations are **role-gated** (`require_role`). The write **`actor` is derived
+> server-side** from the session (`session_actor(user)`) — the `actor` / `by` /
+> `requestedBy` body fields below are **ignored** (kept optional for one release).
+> In the reference build (`AUTH_REQUIRED` unset) an unauthenticated caller is the
+> synthetic `dev` admin, so the contract below behaves unchanged offline; in
+> production (`AUTH_REQUIRED=true`) unauthenticated → **401**, wrong role → **403
+> `forbidden`**. Error bodies for auth are normalized to the same `{error,detail}`
+> shape. RBAC: status/scan/exception require `analyst`; report generation requires
+> `analyst` or an approver role; `admin` is a wildcard.
+
+Every mutation appends an **audit entry** (and scope-gate denials are audited too).
 Writes are applied to the in-memory store so subsequent reads reflect them
 (persistence to Postgres is a later slice). Error bodies are
 `{ "error": "<code>", "detail": "<human message>" }`; the client throws on any
@@ -165,8 +176,10 @@ Body: `{ "template": "audit|exec|asset|sla", "scope": "all|<assetId>", "formats"
 ### `GET /api/reports/{reportId}/{fmt}` — download
 - Streams the file (`fmt` ∈ `xlsx|docx|pdf`) as an attachment with the right
   content-type and `Content-Disposition`. 404 if unknown/expired id/fmt.
-- **No per-user auth yet** (capability-token gated). `TODO(auth)`: require an
-  authenticated caller and enforce the report's `owner`/role here.
+- **Owner-scoped (v1):** requires an authenticated caller; the report's `owner`
+  is the creator's `user.sub`. A non-owner gets **403 `forbidden`** unless they
+  hold `admin`. The unguessable, TTL-bounded capability token is now defence in
+  depth, no longer the sole gate — closing the earlier `TODO(auth)`.
 
 ## Client write methods (`frontend/api.js`)
 `window.api.setFindingStatus(id, body)`, `.startScan(body)`,

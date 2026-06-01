@@ -11,7 +11,7 @@
     </div>;
   }
 
-  function FindingDetail({ id, go, role }) {
+  function FindingDetail({ id, go, user }) {
     // Fetch the single finding via the API (falls back to window.FINDINGS offline).
     const { data, loading } = window.useAsync(() => window.api.finding(id), [id]);
     if (loading && !data) {
@@ -26,13 +26,13 @@
       );
     }
     const finding = data || window.FINDINGS.find(f => f.id === id);
-    return <FindingDetailView finding={finding} id={id} go={go} role={role} />;
+    return <FindingDetailView finding={finding} id={id} go={go} user={user} />;
   }
 
-  const ACTOR = "A. Mehta"; // TODO: real user from auth
-
-  function FindingDetailView({ finding, id, go, role }) {
+  function FindingDetailView({ finding, id, go, user }) {
     const f = finding || window.FINDINGS[0];
+    // Advisory gate: only analyst/admin may change a finding's status (server enforces).
+    const allowed = window.can(user, "analyst");
     // `status` is the committed/displayed status; `pick` is the user's candidate
     // selection in the stepper. Nothing mutates until they deliberately Save.
     const [status, setStatus] = useState(f.status);
@@ -49,7 +49,7 @@
       setSaving(true);
       setSaveErr(null);
       setSaved(false);
-      window.api.setFindingStatus(f.id, { status: pick, actor: ACTOR, note: note.trim() ? note.trim() : undefined })
+      window.api.setFindingStatus(f.id, { status: pick, note: note.trim() ? note.trim() : undefined })
         .then(updated => {
           setStatus(updated.status);
           setPick(updated.status);
@@ -112,7 +112,8 @@ Authorization: Bearer <policyholder-A token>
                   <button className="btn sm" disabled={saving} onClick={() => go("exception", { finding: f.id })}><Icon.exception size={14} /> Request exception</button>
                   <button className="btn sm" disabled={saving}><Icon.history size={14} /> Request retest</button>
                   <div className="spacer" />
-                  <button className="btn primary sm" disabled={saving || pick === status} onClick={saveStatus}>
+                  <button className="btn primary sm" disabled={saving || pick === status || !allowed} onClick={saveStatus}
+                    title={allowed ? undefined : "requires the analyst role"}>
                     {saving ? <span><Icon.scan size={14} /> Saving…</span> : <span><Icon.check size={14} /> Save status</span>}
                   </button>
                 </div>

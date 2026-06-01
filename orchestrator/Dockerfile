@@ -10,7 +10,8 @@ WORKDIR /app
 # full orchestrator requirements.txt pulls heavier packages (temporalio) this
 # service doesn't use — install the lean subset.
 RUN pip install --no-cache-dir "fastapi>=0.110" "uvicorn[standard]>=0.29" "psycopg[binary]>=3.2" \
-    openpyxl python-docx reportlab pikepdf
+    openpyxl python-docx reportlab pikepdf \
+    "authlib>=1.3" "httpx>=0.27" "itsdangerous>=2.2" "ldap3>=2.9"
 
 # Copy the orchestrator package to /app/orchestrator so `orchestrator.api.main`
 # is importable (orchestrator is a namespace package; api has __init__.py).

@@ -20,38 +20,74 @@
     { id: "reports", label: "Reports", icon: Icon.reports },
   ];
 
-  const ROLES = [
-    { id: "analyst", label: "Analyst", sub: "Triage", icon: Icon.user },
-    { id: "lead", label: "Team Lead", sub: "AppSec", icon: Icon.users },
-    { id: "ciso", label: "CISO", sub: "Executive", icon: Icon.shield },
-  ];
-
   const CRUMB = {
     dashboard: "Dashboard", scan: "Start a scan", findings: "Findings",
     detail: "Findings · Detail", sla: "SLA & escalation", exception: "Exceptions",
     reports: "Reports", system: "Design system",
   };
 
-  function RoleSwitch({ role, setRole }) {
+  // Initials from a display name, e.g. "Vantage Dev" → "VD", "A. Mehta" → "AM".
+  function initials(name) {
+    if (!name) return "?";
+    const parts = String(name).trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return "?";
+    const first = parts[0][0] || "";
+    const last = parts.length > 1 ? parts[parts.length - 1][0] || "" : "";
+    return (first + last).toUpperCase();
+  }
+
+  // Pretty label for the primary role (admin wins; else first role; viewer default).
+  function primaryRole(user) {
+    const roles = (user && user.roles) || [];
+    if (roles.indexOf("admin") !== -1) return "admin";
+    return roles[0] || "viewer";
+  }
+
+  // Real identity control: shows the signed-in user (name + role badge + avatar)
+  // with a Sign out action, or a Sign in button when signed out (prod 401).
+  function Identity({ user }) {
     const [open, setOpen] = useState(false);
-    const cur = ROLES.find(r => r.id === role);
-    const Ic = cur.icon;
+
+    if (!user) {
+      return (
+        <button className="btn primary" style={{ gap: 8 }}
+          onClick={() => { window.location.href = window.api.loginUrl(); }}>
+          <Icon.user size={15} /> <span>Sign in</span>
+        </button>
+      );
+    }
+
+    async function signOut() {
+      try { await window.api.logout(); } catch (e) { /* ignore */ }
+      window.location.reload();
+    }
+
     return (
       <div style={{ position: "relative" }}>
-        <button className="btn" onClick={() => setOpen(o => !o)} style={{ gap: 8 }}>
-          <Ic size={15} /> <span>{cur.label}</span> <Icon.chevDown size={14} />
+        <button className="btn" onClick={() => setOpen(o => !o)} style={{ gap: 8 }} title={user.email || user.name}>
+          <span className="col" style={{ lineHeight: 1.15, alignItems: "flex-end" }}>
+            <span style={{ fontWeight: 600 }}>{user.name}</span>
+            <span className="t-xs faint" style={{ textTransform: "capitalize" }}>{primaryRole(user)}</span>
+          </span>
+          <span className="center" style={{ width: 34, height: 34, borderRadius: "50%", background: "var(--accent-soft)", color: "var(--accent-text)", fontWeight: 600, fontSize: 13 }}>{initials(user.name)}</span>
         </button>
         {open && <>
           <div style={{ position: "fixed", inset: 0, zIndex: 20 }} onClick={() => setOpen(false)} />
-          <div className="card" style={{ position: "absolute", right: 0, top: 44, width: 210, zIndex: 21, boxShadow: "var(--sh-3)", padding: 6 }}>
-            <div className="t-label" style={{ padding: "6px 8px" }}>View as</div>
-            {ROLES.map(r => { const RI = r.icon; return (
-              <button key={r.id} className="nav-item" onClick={() => { setRole(r.id); setOpen(false); }} style={{ width: "100%" }}>
-                <span className="nav-ico"><RI size={16} /></span>
-                <span className="col" style={{ lineHeight: 1.2 }}><span style={{ fontWeight: 600 }}>{r.label}</span><span className="t-xs faint">{r.sub}</span></span>
-                {role === r.id && <span style={{ marginLeft: "auto", color: "var(--accent-text)" }}><Icon.check size={15} /></span>}
-              </button>
-            ); })}
+          <div className="card" style={{ position: "absolute", right: 0, top: 48, width: 240, zIndex: 21, boxShadow: "var(--sh-3)", padding: 6 }}>
+            <div className="col gap1" style={{ padding: "8px 10px" }}>
+              <span style={{ fontWeight: 600 }}>{user.name}</span>
+              {user.email && <span className="t-xs faint">{user.email}</span>}
+              <div className="row gap1" style={{ marginTop: 4, flexWrap: "wrap" }}>
+                {((user.roles && user.roles.length) ? user.roles : ["viewer"]).map(r => (
+                  <span key={r} className="chip" style={{ textTransform: "capitalize" }}>{r}</span>
+                ))}
+              </div>
+            </div>
+            <div className="divider" style={{ margin: "4px 0" }} />
+            <button className="nav-item" onClick={signOut} style={{ width: "100%" }}>
+              <span className="nav-ico"><Icon.lock size={16} /></span>
+              <span style={{ fontWeight: 600 }}>Sign out</span>
+            </button>
           </div>
         </>}
       </div>
@@ -62,8 +98,10 @@
     const [t, setTweak] = window.useTweaks(TWEAK_DEFAULTS);
     const [page, setPage] = useState("dashboard");
     const [params, setParams] = useState({});
-    const [role, setRole] = useState("analyst");
     const [collapsed, setCollapsed] = useState(false);
+
+    // Who am I? Resolved once on load from the session cookie. null = signed out.
+    const { data: user } = window.useAsync(() => window.api.me(), []);
 
     const go = (p, prm = {}) => { setPage(p); setParams(prm); document.querySelector(".content").scrollTop = 0; };
 
@@ -82,15 +120,15 @@
 
     let Screen;
     switch (page) {
-      case "dashboard": Screen = <window.Dashboard role={role} go={go} />; break;
-      case "scan": Screen = <window.StartScan go={go} />; break;
+      case "dashboard": Screen = <window.Dashboard go={go} />; break;
+      case "scan": Screen = <window.StartScan go={go} user={user} />; break;
       case "findings": Screen = <window.Findings initial={params} go={go} />; break;
-      case "detail": Screen = <window.FindingDetail id={params.id} role={role} go={go} />; break;
+      case "detail": Screen = <window.FindingDetail id={params.id} go={go} user={user} />; break;
       case "sla": Screen = <window.SLATracker go={go} />; break;
-      case "exception": Screen = <window.Exceptions initial={params} go={go} />; break;
-      case "reports": Screen = <window.Reports go={go} />; break;
+      case "exception": Screen = <window.Exceptions initial={params} go={go} user={user} />; break;
+      case "reports": Screen = <window.Reports go={go} user={user} />; break;
       case "system": Screen = <window.DesignSystem />; break;
-      default: Screen = <window.Dashboard role={role} go={go} />;
+      default: Screen = <window.Dashboard go={go} />;
     }
 
     return (
@@ -106,7 +144,12 @@
           </div>
           <nav className="nav">
             <div className="nav-section">Operations</div>
-            {NAV.map(n => { const NI = n.icon; return (
+            {NAV.map(n => {
+              const NI = n.icon;
+              // Advisory gate: only analyst/admin may start a scan. Hide the nav
+              // entry for everyone else (server still enforces require_role).
+              if (n.id === "scan" && !window.can(user, "analyst")) return null;
+              return (
               <button key={n.id} className={`nav-item${page === n.id || (page === "detail" && n.id === "findings") ? " active" : ""}`} onClick={() => go(n.id)} title={n.label}>
                 <span className="nav-ico"><NI size={17} /></span>
                 <span className="nav-label">{n.label}</span>
@@ -140,8 +183,7 @@
               <Icon.bell size={18} />
               <span style={{ position: "absolute", top: 7, right: 8, width: 7, height: 7, borderRadius: "50%", background: "var(--danger)", border: "1.5px solid var(--surface)" }} />
             </button>
-            <RoleSwitch role={role} setRole={setRole} />
-            <div className="center" style={{ width: 34, height: 34, borderRadius: "50%", background: "var(--accent-soft)", color: "var(--accent-text)", fontWeight: 600, fontSize: 13 }}>AM</div>
+            <Identity user={user} />
           </header>
 
           <main className="content">{Screen}</main>

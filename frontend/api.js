@@ -42,6 +42,7 @@
   async function getJSON(path) {
     const res = await fetch(window.API_BASE + path, {
       headers: { Accept: "application/json" },
+      credentials: "include",
     });
     if (!res.ok) throw new Error("HTTP " + res.status);
     return res.json();
@@ -57,6 +58,7 @@
         method: method || "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify(body || {}),
+        credentials: "include",
       });
     } catch (e) {
       const err = new Error("Network error — the API is unreachable.");
@@ -88,6 +90,27 @@
   }
 
   const api = {
+    // ---- Auth / identity -----------------------------------------------------
+    // Who am I? GET /api/auth/me → the User on 200, or null on 401/any error so
+    // the console can render a signed-out state. Never fabricates a fake user.
+    async me() {
+      try {
+        const data = await getJSON("/api/auth/me");
+        return (data && data.user) || null;
+      } catch (err) {
+        return null;
+      }
+    },
+    // Absolute URL that starts the OIDC redirect; bounces back to `next` (or the
+    // current page) after login. The browser navigates here directly.
+    loginUrl(next) {
+      return window.API_BASE + "/api/auth/login?next=" + encodeURIComponent(next || window.location.href);
+    },
+    // Clear the session server-side. Ignores the (empty) response body.
+    async logout() {
+      try { await sendJSON("/api/auth/logout", {}, "POST"); } catch (e) { /* best-effort */ }
+    },
+
     async findings(params) {
       try {
         const data = await getJSON("/api/findings" + buildQuery(params));
@@ -226,6 +249,15 @@
   }
 
   window.api = api;
+
+  // ---- Advisory role gate (server still enforces via require_role) -----------
+  // can(user, ...roles) → true if the user holds any of `roles` or is `admin`.
+  // Used to hide/disable controls the role can't use; NOT a security boundary.
+  window.can = function (user, ...roles) {
+    if (!user || !Array.isArray(user.roles)) return false;
+    if (user.roles.indexOf("admin") !== -1) return true;
+    return roles.some(function (r) { return user.roles.indexOf(r) !== -1; });
+  };
 
   // ---- Tiny async hook helper (React is global) -----------------------------
   // Usage: const { data, loading, error } = window.useAsync(() => api.findings(), []);

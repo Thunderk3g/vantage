@@ -33,7 +33,7 @@
     );
   }
 
-  function StartScan({ go }) {
+  function StartScan({ go, user }) {
     // Fetch the approved asset inventory via the API (falls back to window.ASSETS offline).
     const { data, loading } = window.useAsync(() => window.api.assets(), []);
     if (loading && !data) {
@@ -47,11 +47,12 @@
         </div>
       );
     }
-    return <StartScanView assets={data || window.ASSETS} go={go} />;
+    return <StartScanView assets={data || window.ASSETS} go={go} user={user} />;
   }
 
-  function StartScanView({ assets: ASSETS, go }) {
-    const BY = "A. Mehta"; // TODO: real user from auth
+  function StartScanView({ assets: ASSETS, go, user }) {
+    // Advisory gate: only analyst/admin may queue a scan (server enforces).
+    const allowed = window.can(user, "analyst");
     const [target, setTarget] = useState(null);
     const [pipeline, setPipeline] = useState("web");
     const [type, setType] = useState("gray-box");
@@ -79,7 +80,6 @@
         pipeline: pipeline,
         mode: type,
         authContext: type === "gray-box" ? auth : undefined,
-        by: BY,
       }).then(function (scan) {
         setCreated(scan);
       }).catch(function (e) {
@@ -212,7 +212,8 @@
           </div>
           <div className="row gap3">
             <button className="btn" disabled={pending} onClick={() => go("dashboard")}>Cancel</button>
-            <button className="btn primary" disabled={!target || pending} onClick={submit}>
+            <button className="btn primary" disabled={!target || pending || !allowed} onClick={submit}
+              title={allowed ? undefined : "requires the analyst role"}>
               {pending ? <><Icon.shield size={14} /> Queueing…</> : <><Icon.play size={14} /> Queue scan</>}
             </button>
           </div>

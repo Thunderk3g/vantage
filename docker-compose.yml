@@ -33,6 +33,23 @@ services:
     environment:
       PYTHONUNBUFFERED: "1"
       DATABASE_URL: postgresql://postgres:postgres@db:5432/vantage
+      # --- Auth/RBAC (AD/LDAP + OIDC) — see docs/auth-contract.md -------------
+      # Left OFF for the local/reference stack: an unauthenticated caller is the
+      # synthetic `dev` admin (actor is still server-derived). To turn on real
+      # auth, set AUTH_REQUIRED=true and the OIDC/LDAP vars below (secrets via the
+      # vault, NOT committed), and a strong SESSION_SECRET.
+      AUTH_REQUIRED: "false"
+      # SESSION_SECRET: "<from vault>"
+      # SESSION_COOKIE_SECURE: "true"
+      # OIDC_ISSUER: "https://login.microsoftonline.com/<tenant>/v2.0"
+      # OIDC_CLIENT_ID: "<app id>"
+      # OIDC_CLIENT_SECRET: "<from vault>"
+      # OIDC_REDIRECT_URI: "https://vantage.internal/api/auth/callback"
+      # VANTAGE_GROUP_ROLE_MAP: '{"SEC-AppSec":"analyst","SEC-CISO":"approver_ciso","SEC-VantageAdmins":"admin"}'
+      # LDAP_URL: "ldaps://dc.corp.example:636"
+      # LDAP_BIND_DN: "<service account>"
+      # LDAP_BIND_PASSWORD: "<from vault>"
+      # LDAP_USER_BASE: "OU=Users,DC=corp,DC=example"
     depends_on:
       db:
         condition: service_healthy

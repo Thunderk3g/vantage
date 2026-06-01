@@ -89,18 +89,29 @@ Ordered roughly by dependency. Tracked live in **[ROADMAP.md](ROADMAP.md)**.
 
 ### Security posture (reference build — read before deploying)
 
-The API has **no authentication yet** — auth/RBAC (#7) is the headline security
-slice. Until it lands, two known, tracked gaps exist by design:
+**Auth/RBAC is now implemented** (AD/LDAP + OIDC — see `docs/auth-contract.md`).
+The two gaps the earlier reviews flagged are **closed in code**:
 
-- **Actor is client-supplied.** Every write sends a `by`/`actor` placeholder
-  (the console sends `"A. Mehta"`); audit attribution is therefore *advisory*,
-  not authenticated. When auth lands, the actor is derived from the session.
-- **Report downloads are capability-token-gated.** `GET /api/reports/{id}/{fmt}`
-  is protected only by an opaque ~192-bit `reportId` (TTL-bounded), not per-user
-  authz. When auth lands, downloads become owner/role-scoped.
+- **Actor is server-derived.** Mutation handlers no longer read `by`/`actor` from
+  the body; the actor comes from the authenticated session (`session_actor(user)`)
+  and is what the hash-chained audit records. The `"A. Mehta"` placeholder is gone.
+- **Report downloads are owner-scoped.** `GET /api/reports/{id}/{fmt}` requires an
+  authenticated caller and enforces the report's `owner` (or `admin`); the opaque
+  TTL-bounded `reportId` is now defence in depth, not the sole gate.
 
-Do not expose this build outside a trusted network until #7 is done. The
-remaining write endpoints inherit the same no-auth caveat.
+Reads require an authenticated user (`/api/health` stays public) and mutations are
+role-gated (`require_role`; `admin` is a wildcard). Validated here against a
+**mock OIDC IdP** (self-signed JWKS) plus an end-to-end RBAC/owner-scoping test;
+see `orchestrator/api/test_auth.py` and `test_api_auth_integration.py`.
+
+**One deliberate switch — `AUTH_REQUIRED`.** It defaults **off** so the offline
+console and CI smoke tests keep working (an unauthenticated caller is a synthetic
+`dev` admin, but the actor is *still* server-derived). Before deploying:
+**set `AUTH_REQUIRED=true`, configure the OIDC/LDAP env (`docs/auth-contract.md`
+§5), and set a real `SESSION_SECRET`.** Until that is done in a given environment,
+the build is unauthenticated by configuration — keep it on a trusted network.
+What still needs a live tenant + browser: the interactive redirect, real AD
+`groups`/LDAP `memberOf`, and end-session (config/deploy, not code).
 
 ## Repository layout
 

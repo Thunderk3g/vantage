@@ -21,7 +21,7 @@
     return <span className={`status ${cls}`}><span className="sdot" />{label}</span>;
   }
 
-  function Exceptions({ initial, go }) {
+  function Exceptions({ initial, go, user }) {
     // Fetch the exception register via the API (falls back to window.EXCEPTIONS offline).
     const { data, loading } = window.useAsync(() => window.api.exceptions(), []);
     if (loading && !data) {
@@ -35,10 +35,12 @@
         </div>
       );
     }
-    return <ExceptionsView exceptions={data || window.EXCEPTIONS} initial={initial} go={go} />;
+    return <ExceptionsView exceptions={data || window.EXCEPTIONS} initial={initial} go={go} user={user} />;
   }
 
-  function ExceptionsView({ exceptions, initial, go }) {
+  function ExceptionsView({ exceptions, initial, go, user }) {
+    // Advisory gate: only analyst/admin may request an exception (server enforces).
+    const allowed = window.can(user, "analyst");
     const [showForm, setShowForm] = useState(!!(initial && initial.finding));
     const [months, setMonths] = useState(2);
     const tier = tierFor(months);
@@ -53,8 +55,6 @@
     const [pending, setPending] = useState(false);
     const [error, setError] = useState(null);
     const [result, setResult] = useState(null); // { exception, tier } from the server
-
-    const BY = "A. Mehta"; // TODO: real user from auth
 
     function openForm() {
       setError(null);
@@ -76,7 +76,6 @@
       try {
         const res = await window.api.requestException({
           findingId: findingId,
-          requestedBy: BY,
           durationMonths: months,
           documentedRisk: risk,
         });
@@ -97,7 +96,7 @@
           <h1 className="t-h1">Exception management</h1>
           <div className="page-sub">Risk-accepted findings and time-boxed exceptions. Approval tier is set by requested duration.</div>
         </div><div className="spacer" />
-          <button className="btn primary" onClick={openForm}><Icon.plus size={15} /> Request exception</button>
+          <button className="btn primary" onClick={openForm} disabled={!allowed} title={allowed ? undefined : "requires the analyst role"}><Icon.plus size={15} /> Request exception</button>
         </div>
 
         {/* Server-confirmed request banner */}
@@ -199,7 +198,7 @@
               )}
               <div className="modal-foot">
                 <button className="btn" onClick={closeForm} disabled={pending}>Cancel</button>
-                <button className="btn primary" onClick={submit} disabled={pending}>{pending ? "Submitting…" : `Submit to ${tier}`}</button>
+                <button className="btn primary" onClick={submit} disabled={pending || !allowed} title={allowed ? undefined : "requires the analyst role"}>{pending ? "Submitting…" : `Submit to ${tier}`}</button>
               </div>
             </div>
           </>

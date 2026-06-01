@@ -1,7 +1,12 @@
-"""Vantage read-only REST API (FastAPI).
+"""Vantage REST API (FastAPI).
 
 Implements the frozen contract in ``docs/api-contract.md``. Serves the Python
 seed dataset ported from ``frontend/data.js`` -- no Postgres / Temporal needed.
+
+Auth/RBAC per ``docs/auth-contract.md``: all reads require an authenticated
+user (``/api/health`` stays public); mutations are role-gated via
+``require_role``. The write ``actor`` is now derived **server-side** from the
+session (``session_actor(user)``) and is never taken from the request body.
 
 Run:
     uvicorn orchestrator.api.main:app --port 8138
@@ -15,11 +20,12 @@ import tempfile
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi import Body, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
 from . import seed
+from .auth import Role, User, get_current_user, require_role, session_actor, router as auth_router
 from orchestrator.reporting.export import build_xlsx, build_docx, build_pdf
 
 app = FastAPI(title="Vantage API", version="0", description="Read-only vulnerability-scanner console API.")
@@ -33,6 +39,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount the OIDC/auth router (prefix="/api/auth").
+app.include_router(auth_router)
+
 TODAY_ISO = seed.TODAY.isoformat()
 DUE_SOON_DAYS = 7  # daysLeft within [0, 7] counts as "due soon"
 
@@ -45,6 +54,22 @@ ALLOWED_STATUSES = {"open", "triaged", "in_progress", "retest", "closed"}
 def _err(status_code: int, error: str, detail: str) -> JSONResponse:
     """Contract error body: {"error","detail"} with the given status code."""
     return JSONResponse(status_code=status_code, content={"error": error, "detail": detail})
+
+
+@app.exception_handler(HTTPException)
+def _normalize_http_exception(request, exc: HTTPException):
+    """Keep every error body in the contract shape {"error","detail"}.
+
+    The auth dependencies (`get_current_user`/`require_role`) raise
+    `HTTPException(detail={"error","detail"})` so they can share the contract
+    shape. FastAPI's default handler would nest that under another "detail" key
+    ({"detail":{"error":...}}), which breaks the console's error reader. Surface
+    such dict-details at the TOP level; fall back to the default {"detail": ...}
+    for plain-string HTTPExceptions (e.g. the 404s raised elsewhere here).
+    """
+    if isinstance(exc.detail, dict) and "error" in exc.detail:
+        return JSONResponse(status_code=exc.status_code, content=exc.detail)
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
 def _sla_bucket(f: dict) -> str:
@@ -89,6 +114,7 @@ def list_findings(
     q: Optional[str] = Query(None, description="substring of id/title/asset"),
     sort: Optional[str] = Query(None),
     dir: str = Query("asc", description="asc|desc"),
+    user: User = Depends(get_current_user),
 ):
     items = seed.findings()
 
@@ -132,7 +158,7 @@ def list_findings(
 
 
 @app.get("/api/findings/{finding_id}")
-def get_finding(finding_id: str):
+def get_finding(finding_id: str, user: User = Depends(get_current_user)):
     for f in seed.findings():
         if f["id"] == finding_id:
             return {"finding": f}
@@ -140,27 +166,27 @@ def get_finding(finding_id: str):
 
 
 @app.get("/api/assets")
-def list_assets():
+def list_assets(user: User = Depends(get_current_user)):
     return {"assets": seed.assets()}
 
 
 @app.get("/api/scans")
-def list_scans():
+def list_scans(user: User = Depends(get_current_user)):
     return {"scans": seed.scans()}
 
 
 @app.get("/api/exceptions")
-def list_exceptions():
+def list_exceptions(user: User = Depends(get_current_user)):
     return {"exceptions": seed.exceptions()}
 
 
 @app.get("/api/trend")
-def get_trend():
+def get_trend(user: User = Depends(get_current_user)):
     return {"trend": seed.trend()}
 
 
 @app.get("/api/dashboard")
-def dashboard():
+def dashboard(user: User = Depends(get_current_user)):
     items = seed.findings()
     open_items = [f for f in items if not f["isClosed"]]
 
@@ -188,19 +214,25 @@ def dashboard():
 
 
 # ---------------------------------------------------------------------------
-# Write endpoints (v0.1) — human-gated. Every mutation requires a human actor
-# and appends an audit entry; scope-gate denials are audited too. Error bodies
-# follow the {"error","detail"} contract shape.
+# Write endpoints (v0.1) — human-gated + role-gated (see docs/auth-contract.md
+# §3). The acting identity is derived SERVER-SIDE from the authenticated
+# session via session_actor(user) and used for both the seed store call and the
+# audit `actor=`; the request body NO LONGER supplies actor/by/requestedBy
+# (older clients may still send them — they are ignored). Every mutation appends
+# an audit entry; scope-gate denials are audited too (with the session actor).
+# Error bodies follow the {"error","detail"} contract shape.
 # ---------------------------------------------------------------------------
 
 
 @app.patch("/api/findings/{finding_id}/status")
-def set_finding_status(finding_id: str, body: dict = Body(...)):
+def set_finding_status(
+    finding_id: str,
+    body: dict = Body(...),
+    user: User = Depends(require_role(Role.ANALYST)),
+):
     status = body.get("status")
-    actor = body.get("actor")
+    actor = session_actor(user)
 
-    if not actor or not str(actor).strip():
-        return _err(422, "missing_actor", "A human 'actor' is required for this mutation")
     if status not in ALLOWED_STATUSES:
         return _err(
             422,
@@ -208,12 +240,12 @@ def set_finding_status(finding_id: str, body: dict = Body(...)):
             f"status must be one of {sorted(ALLOWED_STATUSES)}; got {status!r}",
         )
 
-    updated = seed.update_finding_status(finding_id, status, str(actor), TODAY_ISO)
+    updated = seed.update_finding_status(finding_id, status, actor, TODAY_ISO)
     if updated is None:
         return _err(404, "not_found", f"Finding not found: {finding_id}")
 
     seed.record_audit(
-        actor=str(actor),
+        actor=actor,
         action="FINDING_STATUS_CHANGED",
         entity_type="finding",
         entity_id=finding_id,
@@ -223,19 +255,22 @@ def set_finding_status(finding_id: str, body: dict = Body(...)):
 
 
 @app.post("/api/scans")
-def request_scan(body: dict = Body(...)):
+def request_scan(
+    body: dict = Body(...),
+    user: User = Depends(require_role(Role.ANALYST)),
+):
     asset_id = body.get("assetId")
     pipeline = body.get("pipeline")
     mode = body.get("mode")
     auth_context = body.get("authContext")
-    by = body.get("by")
+    by = session_actor(user)
 
     # SCOPE GATE — fail closed. Unknown / non-approved asset is denied first and
-    # audited, before any other validation.
+    # audited (with the session actor), before any other validation.
     asset = seed.asset_by_id(asset_id) if asset_id else None
     if asset is None:
         seed.record_audit(
-            actor=str(by) if by else "unknown",
+            actor=by,
             action="SCAN_DENIED_OUT_OF_SCOPE",
             entity_type="asset",
             entity_id=str(asset_id),
@@ -247,8 +282,6 @@ def request_scan(body: dict = Body(...)):
             f"{asset_id} is not in the approved asset inventory",
         )
 
-    if not by or not str(by).strip():
-        return _err(422, "missing_actor", "A human 'by' is required for this mutation")
     if pipeline not in ("web", "infra"):
         return _err(422, "invalid_pipeline", "pipeline must be 'web' or 'infra'")
     if pipeline != asset["type"]:
@@ -260,9 +293,9 @@ def request_scan(body: dict = Body(...)):
     if mode == "gray-box" and (not auth_context or not str(auth_context).strip()):
         return _err(422, "missing_auth_context", "gray-box scans require 'authContext'")
 
-    scan = seed.add_scan(asset, pipeline, mode, auth_context, str(by))
+    scan = seed.add_scan(asset, pipeline, mode, auth_context, by)
     seed.record_audit(
-        actor=str(by),
+        actor=by,
         action="SCAN_REQUESTED",
         entity_type="scan",
         entity_id=scan["id"],
@@ -272,14 +305,15 @@ def request_scan(body: dict = Body(...)):
 
 
 @app.post("/api/exceptions")
-def request_exception(body: dict = Body(...)):
+def request_exception(
+    body: dict = Body(...),
+    user: User = Depends(require_role(Role.ANALYST)),
+):
     finding_id = body.get("findingId")
-    requested_by = body.get("requestedBy")
+    requested_by = session_actor(user)
     duration_months = body.get("durationMonths")
     documented_risk = body.get("documentedRisk")
 
-    if not requested_by or not str(requested_by).strip():
-        return _err(422, "missing_actor", "A human 'requestedBy' is required for this mutation")
     if not documented_risk or not str(documented_risk).strip():
         return _err(422, "missing_documented_risk", "'documentedRisk' is required")
     if not isinstance(duration_months, int) or isinstance(duration_months, bool) or duration_months <= 0:
@@ -289,9 +323,9 @@ def request_exception(body: dict = Body(...)):
     if finding is None:
         return _err(404, "not_found", f"Finding not found: {finding_id}")
 
-    exc, tier = seed.add_exception(dict(finding), str(requested_by), duration_months, str(documented_risk))
+    exc, tier = seed.add_exception(dict(finding), requested_by, duration_months, str(documented_risk))
     seed.record_audit(
-        actor=str(requested_by),
+        actor=requested_by,
         action="EXCEPTION_REQUESTED",
         entity_type="exception",
         entity_id=exc["id"],
@@ -301,7 +335,7 @@ def request_exception(body: dict = Body(...)):
 
 
 @app.get("/api/audit")
-def get_audit(limit: Optional[int] = Query(None, ge=1)):
+def get_audit(limit: Optional[int] = Query(None, ge=1), user: User = Depends(get_current_user)):
     return {"audit": seed.audit(limit)}
 
 
@@ -323,12 +357,11 @@ _REPORT_MEDIA = {
 
 # In-memory report registry: {reportId: {"owner", "paths": {fmt: path}, "created"}}.
 #
-# SECURITY: `report_id` is a high-entropy, unguessable *capability token* — it is
-# currently the ONLY thing gating download, because the API has no authentication
-# yet (see ROADMAP "Auth/RBAC"). Two consequences, both tracked:
+# SECURITY: download is now gated by an authenticated, owner-scoped check
+# (download_report enforces `entry["owner"] == user.sub` or admin). The
+# high-entropy, unguessable `report_id` is retained as *defense in depth*:
 #   * Reports must NOT be enumerable -> the id carries ~192 bits of entropy.
-#   * Once auth exists, bind download to `owner` and require the report-read role
-#     (do not rely on the unguessable id as access control).
+#   * `owner` is the session subject id (user.sub), set at creation.
 # Entries expire after _REPORT_TTL to bound the exposure window.
 _REPORTS: dict[str, dict] = {}
 _REPORT_TTL = 3600  # seconds
@@ -347,20 +380,20 @@ def _prune_reports() -> None:
 
 
 @app.post("/api/reports")
-def create_report(body: dict = Body(...)):
-    # SECURITY: `by` is a CLIENT-SUPPLIED actor placeholder — the API has no auth
-    # yet (ROADMAP "Auth/RBAC"), so audit attribution is advisory until the actor
-    # is derived from an authenticated session. This caveat applies to every write
-    # endpoint, not just reports; it is the headline item of the auth slice.
-    by = body.get("by")
+def create_report(
+    body: dict = Body(...),
+    user: User = Depends(require_role(
+        Role.ANALYST, Role.APPROVER_CISO, Role.APPROVER_RMC, Role.APPROVER_BOARD
+    )),
+):
+    # SECURITY: the acting identity is derived SERVER-SIDE from the authenticated
+    # session (session_actor) — the request body no longer supplies the actor.
+    by = session_actor(user)
     scope = body.get("scope", "all")
     formats = body.get("formats")
     open_password = body.get("openPassword")
     owner_password = body.get("ownerPassword")
     template = body.get("template")
-
-    if not by or not str(by).strip():
-        return _err(422, "missing_actor", "A human 'by' is required for this mutation")
 
     if not isinstance(formats, list) or not formats:
         return _err(422, "invalid_formats", "'formats' must be a non-empty list")
@@ -413,7 +446,7 @@ def create_report(body: dict = Body(...)):
         files[fmt] = f"/api/reports/{report_id}/{fmt}"
 
     _REPORTS[report_id] = {
-        "owner": str(by),   # creator; enforced as an authz check once auth exists
+        "owner": user.sub,   # session subject id; enforced on download (authz)
         "paths": paths,
         "created": datetime.now(timezone.utc).timestamp(),
     }
@@ -435,15 +468,18 @@ def create_report(body: dict = Body(...)):
 
 
 @app.get("/api/reports/{report_id}/{fmt}")
-def download_report(report_id: str, fmt: str):
-    # SECURITY: gated only by the unguessable, TTL-bounded report_id (capability
-    # token) — there is no auth yet. TODO(auth): require an authenticated caller
-    # and enforce `entry["owner"] == current_user` (or a report-read role) here.
+def download_report(report_id: str, fmt: str, user: User = Depends(get_current_user)):
+    # SECURITY: download requires an authenticated caller and is owner-scoped —
+    # the report owner (entry["owner"] == user.sub) or an admin may download.
+    # The unguessable, TTL-bounded report_id is now defense in depth, not the
+    # sole access gate.
     _prune_reports()
     fmt = fmt.lower()
     entry = _REPORTS.get(report_id)
     if not entry or fmt not in entry["paths"]:
         raise HTTPException(status_code=404, detail=f"Report not found: {report_id}/{fmt}")
+    if entry["owner"] != user.sub and Role.ADMIN.value not in user.roles:
+        return _err(403, "forbidden", "not the report owner")
     return FileResponse(
         entry["paths"][fmt],
         media_type=_REPORT_MEDIA[fmt],

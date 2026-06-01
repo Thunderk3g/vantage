@@ -32,7 +32,13 @@ Keep it honest: check a box only when the exit criteria are met and verified.
 - [ ] Scope gate wired to a real inventory source (`_resolve_approved_targets`)
 - [ ] Ed25519 token signing via vault (`_sign_token`)
 - [ ] Datastore layer (psycopg) behind the activity stubs
-- [ ] RBAC / SSO (AD/LDAP + SAML/OIDC)
+- [~] RBAC / SSO (AD/LDAP + OIDC) — **code complete & tested** (`api/auth.py`:
+      OIDC Auth-Code+PKCE, JWKS id_token validation, AD-group→role map, LDAP
+      `memberOf` fallback, signed session cookie, `require_role`; RBAC matrix wired
+      into `api/main.py`; console identity/sign-in; `db/schema.sql` identities/
+      roles/group_role_map). `actor` is now server-derived; report download is
+      owner-scoped. **Remaining:** point at a live Entra/AD tenant + enable
+      `AUTH_REQUIRED` in the enclave (config/deploy, not code).
 - [ ] Temporal cluster + worker deployed in the enclave
 
 ## Phase 1 — Infra MVP  `target: 3–4 wks`
@@ -84,7 +90,10 @@ Keep it honest: check a box only when the exit criteria are met and verified.
 - [x] Reports screen triggers real export — `POST /api/reports` (xlsx/docx/
       dual-password PDF) + `GET /api/reports/{id}/{fmt}` download, wired to the
       screen's generate flow (open + owner passwords)
-- [ ] Auth/RBAC: real `actor` from SSO replaces the `"A. Mehta"` placeholder
+- [x] Auth/RBAC: the `"A. Mehta"` placeholder is gone — the console resolves the
+      real user via `GET /api/auth/me`, shows identity + sign-in/out, and advisory
+      role-gates controls; the server derives `actor` and enforces roles. Real
+      tenant wiring + `AUTH_REQUIRED=true` is the deploy step.
 
 ## Phase 2 — Web MVP  `target: 3–4 wks`
 **Exit:** web pipeline parity.

@@ -366,4 +366,108 @@ LEFT JOIN slas s ON s.finding_id = f.finding_id
 WHERE   f.status NOT IN ('closed', 'risk_accepted', 'confirmed_fp')
   AND   f.dup_of IS NULL;
 
+
+-- =====================================================================
+-- Identity & RBAC (auth slice) — AD/LDAP + OIDC
+-- Implements the FROZEN contract in docs/auth-contract.md (§1 roles +
+-- AD-group->role map, §2 User shape / session, §3 RBAC).
+--
+-- Enforcement of RBAC lives in the API (auth.py :: require_role); these
+-- tables are the DB-side system of record for *who* a principal is, the
+-- effective roles resolved from AD groups at login, and the group->role
+-- mapping. The signed session cookie (itsdangerous, §2) is stateless and
+-- is the runtime source of truth for a session — auth_sessions below is a
+-- LOGIN AUDIT / forensics table only, NOT used for session validation.
+--
+-- Actor-spoofing closure: audit_log.actor (above) is now written with the
+-- *session-derived* actor server-side (session_actor(user), e.g.
+-- "Vantage Dev <dev@vantage.local>"); mutation handlers no longer read the
+-- actor from the request body. No audit_log schema change is needed — the
+-- guarantee is in how actor is populated, not in its column.
+-- =====================================================================
+
+-- Wire values MUST match auth.py :: class Role(str, Enum) exactly (§1).
+-- 'admin' is a wildcard that implicitly satisfies every require_role check.
+CREATE TYPE vantage_role AS ENUM (
+    'viewer', 'analyst', 'approver_ciso', 'approver_rmc', 'approver_board', 'admin'
+);
+
+
+-- ---------------------------------------------------------------------
+-- 10. IDENTITIES — one row per authenticated principal (IdP subject).
+--     `sub` is the stable OIDC subject id ('dev' in dev mode). email is
+--     stored as citext (extension already enabled above) so uniqueness is
+--     case-insensitive without a separate functional index.
+-- ---------------------------------------------------------------------
+CREATE TABLE identities (
+    identity_id     uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    sub             text NOT NULL UNIQUE,         -- stable IdP subject id
+    email           citext UNIQUE,                -- case-insensitive, may be null
+    display_name    text,
+    last_login_at   timestamptz,
+    is_active       boolean NOT NULL DEFAULT true,
+    created_at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_identities_active ON identities (is_active) WHERE is_active;
+
+
+-- ---------------------------------------------------------------------
+-- 11. IDENTITY_ROLES — the effective roles a principal holds, resolved
+--     from AD groups at login (a user may hold multiple roles). This is
+--     the materialized result of group_role_map applied to the user's
+--     group claims; the session cookie carries the same set at runtime.
+-- ---------------------------------------------------------------------
+CREATE TABLE identity_roles (
+    identity_id     uuid NOT NULL REFERENCES identities(identity_id) ON DELETE CASCADE,
+    role            vantage_role NOT NULL,
+    granted_at      timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (identity_id, role)
+);
+CREATE INDEX idx_identity_roles_role ON identity_roles (role);
+
+
+-- ---------------------------------------------------------------------
+-- 12. GROUP_ROLE_MAP — DB-side mirror of the env VANTAGE_GROUP_ROLE_MAP
+--     (§1). Maps an AD group (group name or DN, matched case-insensitively
+--     by the app) to a role. A single group may map to multiple roles.
+--     A user with no mapped group gets 'viewer' (least privilege) in the
+--     app — that default is not represented as a row here.
+-- ---------------------------------------------------------------------
+CREATE TABLE group_role_map (
+    ad_group        text NOT NULL,                -- AD group name or DN
+    role            vantage_role NOT NULL,
+    note            text,
+    PRIMARY KEY (ad_group, role)
+);
+
+-- Representative seed mapping (documents the intended wiring in-schema).
+INSERT INTO group_role_map (ad_group, role, note) VALUES
+    ('SEC-AppSec',        'analyst',        'AppSec engineers / triagers'),
+    ('SEC-CISO',          'approver_ciso',  'CISO exception approver (<=3mo)'),
+    ('SEC-RMC',           'approver_rmc',   'Risk Mgmt Committee approver (>3-12mo)'),
+    ('SEC-Board',         'approver_board', 'Board approver (>12mo)'),
+    ('SEC-Auditors',      'viewer',         'Read-only auditors'),
+    ('SEC-VantageAdmins', 'admin',          'Vantage administrators (wildcard)');
+
+
+-- ---------------------------------------------------------------------
+-- 13. AUTH_SESSIONS — LOGIN AUDIT / forensics ONLY.
+--     The runtime uses stateless signed cookies (§2); the signed cookie
+--     is the source of truth for session validity. This table is written
+--     at login for login-history / observability and is NEVER consulted to
+--     validate a request. A non-null revoked_at records an explicit logout
+--     or admin revocation for the forensic trail.
+-- ---------------------------------------------------------------------
+CREATE TABLE auth_sessions (
+    session_id      uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    identity_id     uuid NOT NULL REFERENCES identities(identity_id) ON DELETE CASCADE,
+    issued_at       timestamptz NOT NULL DEFAULT now(),
+    expires_at      timestamptz NOT NULL,
+    user_agent      text,
+    revoked_at      timestamptz
+);
+CREATE INDEX idx_auth_sessions_identity ON auth_sessions (identity_id);
+CREATE INDEX idx_auth_sessions_active   ON auth_sessions (expires_at)
+    WHERE revoked_at IS NULL;
+
 COMMIT;

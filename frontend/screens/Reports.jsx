@@ -15,7 +15,7 @@
     { id: "docx", name: "Word", desc: "Editable report (.docx)", icon: Icon.detail },
   ];
 
-  function Reports({ go }) {
+  function Reports({ go, user }) {
     // Fetch the approved asset inventory and findings register via the API.
     // Both fall back to window.ASSETS / window.FINDINGS offline (api.js handles
     // the per-call fallback internally; the `||` here guards a hard failure).
@@ -38,10 +38,12 @@
 
     const assets = (data && data.assets) || window.ASSETS;
     const findings = (data && data.findings && data.findings.findings) || window.FINDINGS;
-    return <ReportsView go={go} assets={assets} findings={findings} />;
+    return <ReportsView go={go} assets={assets} findings={findings} user={user} />;
   }
 
-  function ReportsView({ go, assets, findings }) {
+  function ReportsView({ go, assets, findings, user }) {
+    // Advisory gate: analyst / approver_* / admin may generate reports (server enforces).
+    const allowed = window.can(user, "analyst", "approver_ciso", "approver_rmc", "approver_board");
     const [tpl, setTpl] = useState("audit");
     const [fmt, setFmt] = useState("pdf");
     const [scope, setScope] = useState("all");
@@ -80,7 +82,6 @@
           formats,
           openPassword: needsPw ? openPw : undefined,
           ownerPassword: needsPw ? ownerPw : undefined,
-          by: "A. Mehta", // TODO: real user from auth
         });
         setResult(res);
         setStage("done");
@@ -156,7 +157,8 @@
               <div className="row between t-sm"><span className="faint">Format</span><span style={{ fontWeight: 500 }}>{fmtMeta.name}</span></div>
               <div className="row between t-sm"><span className="faint">Protection</span><span style={{ fontWeight: 500 }}>{needsPw ? "Password" : "None"}</span></div>
               <div className="row between t-sm"><span className="faint">Classification</span><span className="chip" style={{ color: "var(--danger)", background: "var(--sev-critical-bg)", borderColor: "var(--sev-critical-border)" }}>Confidential</span></div>
-              <button className="btn primary full mt2" onClick={generate}><Icon.download size={15} /> Generate {fmtMeta.name}</button>
+              <button className="btn primary full mt2" onClick={generate} disabled={!allowed} title={allowed ? undefined : "requires the analyst or an approver role"}><Icon.download size={15} /> Generate {fmtMeta.name}</button>
+              {!allowed && <span className="t-xs faint">Generating reports requires the analyst or an approver role.</span>}
               {err && stage === "config" && <span className="t-xs" style={{ color: "var(--danger)" }}>{err}</span>}
             </div>
             <div className="card card-pad t-xs faint col gap2">
@@ -183,7 +185,7 @@
               </div>
               <div className="modal-foot">
                 <button className="btn" onClick={() => { setErr(""); setStage("config"); }}>Cancel</button>
-                <button className="btn primary" disabled={openPw.length < 12 || !ownerPw || openPw === ownerPw} onClick={run}><Icon.lock size={14} /> Encrypt &amp; generate</button>
+                <button className="btn primary" disabled={openPw.length < 12 || !ownerPw || openPw === ownerPw || !allowed} title={allowed ? undefined : "requires the analyst or an approver role"} onClick={run}><Icon.lock size={14} /> Encrypt &amp; generate</button>
               </div>
             </div>
           </>
