@@ -64,6 +64,10 @@ jobs:
           pip install "fastapi>=0.110" "authlib>=1.3" "httpx>=0.27" "itsdangerous>=2.2" "ldap3>=2.9" "PyJWT>=2.8" cryptography
           python orchestrator/api/test_auth.py
           python orchestrator/api/test_api_auth_integration.py
+      - name: FP + exception-decision workflow (risk_accepted only via approval)
+        run: |
+          pip install "fastapi>=0.110" httpx
+          python orchestrator/api/test_fp_exception_workflow.py
       - name: Guard — no exploitation phase may be introduced
         run: |
           if grep -rniE "phase\s*=\s*['\"]?(exploit|post_exploit|lateral|remediate)" orchestrator db; then

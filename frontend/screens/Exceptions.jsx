@@ -15,6 +15,12 @@
     return "Board";
   }
 
+  // Advisory role required to decide an exception at a given approval tier.
+  // The server enforces the same mapping (admin always allowed via window.can).
+  function roleForTier(tier) {
+    return { CISO: "approver_ciso", RMC: "approver_rmc", Board: "approver_board" }[tier];
+  }
+
   function ExcStatus({ s }) {
     const map = { approved: ["closed", "Approved"], pending: ["in_progress", "Pending approval"], rejected: ["risk_accepted", "Rejected"] };
     const [cls, label] = map[s] || ["open", s];
@@ -55,6 +61,38 @@
     const [pending, setPending] = useState(false);
     const [error, setError] = useState(null);
     const [result, setResult] = useState(null); // { exception, tier } from the server
+    // Per-row decision in flight, keyed by exception id, so only that row's
+    // buttons disable while approving/rejecting.
+    const [deciding, setDeciding] = useState({});
+
+    // Approve / reject an exception. `decision` is "approve" | "reject". On
+    // success the row is replaced with the server's authoritative exception
+    // (status -> approved/rejected, reviewDate set) and a banner is shown.
+    // On failure the row is unchanged and the error surfaces — never faked.
+    function decide(ev, exc, decision) {
+      ev.stopPropagation(); // don't trigger the row's navigate-to-detail
+      if (deciding[exc.id]) return;
+      setDeciding(prev => Object.assign({}, prev, { [exc.id]: true }));
+      setError(null);
+      setResult(null);
+      window.api.decideException(exc.id, { decision: decision })
+        .then(res => {
+          setRows(prev => prev.map(r => (r.id === exc.id ? res.exception : r)));
+          const verb = res.exception.status === "approved" ? "approved" : "rejected";
+          const tail = res.finding
+            ? (verb === "approved"
+                ? " — finding " + res.finding.id + " risk-accepted."
+                : " — finding " + res.finding.id + " returned to triage.")
+            : ".";
+          setResult({ message: "Exception " + res.exception.id + " " + verb + tail });
+        })
+        .catch(err => {
+          setError(err && err.message ? err.message : "Decision failed");
+        })
+        .finally(() => {
+          setDeciding(prev => { const n = Object.assign({}, prev); delete n[exc.id]; return n; });
+        });
+    }
 
     function openForm() {
       setError(null);
@@ -99,12 +137,24 @@
           <button className="btn primary" onClick={openForm} disabled={!allowed} title={allowed ? undefined : "requires the analyst role"}><Icon.plus size={15} /> Request exception</button>
         </div>
 
-        {/* Server-confirmed request banner */}
+        {/* Server-confirmed request / decision banner */}
         {result && (
           <div className="card card-pad row gap3 mb5" style={{ alignItems: "center", borderColor: "var(--accent-soft-border)", background: "var(--accent-soft)" }}>
             <Icon.check size={18} />
-            <span className="t-sm flex1">Exception <b className="mono">{result.exception.id}</b> requested for <span className="mono">{result.exception.finding}</span> — routed to <b>{result.tier}</b> for approval.</span>
+            {result.message ? (
+              <span className="t-sm flex1">{result.message}</span>
+            ) : (
+              <span className="t-sm flex1">Exception <b className="mono">{result.exception.id}</b> requested for <span className="mono">{result.exception.finding}</span> — routed to <b>{result.tier}</b> for approval.</span>
+            )}
             <button className="icon-btn" onClick={() => setResult(null)}><Icon.x size={16} /></button>
+          </div>
+        )}
+        {/* Decision error banner (request errors render inside the modal) */}
+        {error && !showForm && (
+          <div className="card card-pad row gap3 mb5" style={{ alignItems: "center", borderColor: "var(--danger-soft-border, var(--danger))", background: "var(--danger-soft, var(--surface-2))", color: "var(--danger-text, var(--ink))" }}>
+            <Icon.alert size={18} />
+            <span className="t-sm flex1">{error}</span>
+            <button className="icon-btn" onClick={() => setError(null)}><Icon.x size={16} /></button>
           </div>
         )}
 
@@ -125,10 +175,14 @@
           <div className="table-wrap">
             <table className="tbl">
               <thead><tr>
-                <th>Exception</th><th>Finding</th><th>Sev</th><th>Asset</th><th>Duration</th><th>Approval tier</th><th>Status</th><th>Review by</th>
+                <th>Exception</th><th>Finding</th><th>Sev</th><th>Asset</th><th>Duration</th><th>Approval tier</th><th>Status</th><th>Actions</th><th>Review by</th>
               </tr></thead>
               <tbody>
-                {rows.map(e => (
+                {rows.map(e => {
+                  const decidable = e.status === "requested" || e.status === "pending";
+                  const canDecide = window.can(user, roleForTier(e.tier));
+                  const busy = !!deciding[e.id];
+                  return (
                   <tr key={e.id} onClick={() => go("detail", { id: e.finding })}>
                     <td><div className="cell-strong mono">{e.id}</div><div className="cell-sub" style={{ maxWidth: 220 }}>{e.title}</div></td>
                     <td><span className="mono t-sm">{e.finding}</span></td>
@@ -137,9 +191,29 @@
                     <td><span className="t-sm mono">{e.duration} mo</span></td>
                     <td><span className="chip" style={{ borderColor: "var(--accent-soft-border)", background: "var(--accent-soft)", color: "var(--accent-text)" }}>{e.tier}</span></td>
                     <td><ExcStatus s={e.status} /></td>
+                    <td onClick={ev => ev.stopPropagation()}>
+                      {decidable ? (
+                        <div className="row gap2" style={{ flexWrap: "nowrap" }}>
+                          <button className="btn sm primary" disabled={busy || !canDecide}
+                            title={canDecide ? undefined : "requires the " + e.tier + " approver role"}
+                            onClick={ev => decide(ev, e, "approve")}>
+                            <Icon.check size={13} /> {busy ? "…" : "Approve"}
+                          </button>
+                          <button className="btn sm" disabled={busy || !canDecide}
+                            title={canDecide ? undefined : "requires the " + e.tier + " approver role"}
+                            onClick={ev => decide(ev, e, "reject")}
+                            style={{ color: "var(--danger)", borderColor: "var(--danger-soft-border, var(--border))" }}>
+                            <Icon.x size={13} /> Reject
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="t-xs faint">—</span>
+                      )}
+                    </td>
                     <td><span className="t-sm faint mono">{e.reviewDate}</span></td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

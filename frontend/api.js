@@ -211,6 +211,15 @@
     requestException(body) {
       return sendJSON("/api/exceptions", body, "POST");
     },
+    // Confirm/clear a finding as a false positive. Returns the updated finding.
+    setFalsePositive(id, body) {
+      return sendJSON("/api/findings/" + encodeURIComponent(id) + "/false-positive", body, "POST")
+        .then(function (d) { return hydrateFinding(d && d.finding); });
+    },
+    // Approve/reject an exception. Returns { exception, finding }.
+    decideException(id, body) {
+      return sendJSON("/api/exceptions/" + encodeURIComponent(id) + "/decision", body, "POST");
+    },
     // Recent audit-trail entries (read; falls back to [] offline).
     async audit(limit) {
       try {

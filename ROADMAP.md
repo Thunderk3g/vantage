@@ -91,7 +91,13 @@ Keep it honest: check a box only when the exit criteria are met and verified.
       the base, in-memory no-op fallback otherwise. Tested both seams (store↔PG in
       CI's schema job; seed↔store overlay in the python job) + a verified
       restart-survival e2e against real Postgres.
-- [ ] FP confirm/clear workflow + risk-acceptance via approved exception
+- [x] FP confirm/clear workflow + risk-acceptance via approved exception —
+      `POST /api/findings/{id}/false-positive` (analyst) and
+      `POST /api/exceptions/{id}/decision` (tier-gated: CISO/RMC/Board approver).
+      Approval is the **only** path to `risk_accepted`; the generic status PATCH
+      still rejects it. Console: FP confirm/clear on the finding, approve/reject on
+      the exception register (role-gated). Persisted via the store overlay; tested
+      end-to-end (`api/test_fp_exception_workflow.py`, in CI).
 - [x] Reports screen triggers real export — `POST /api/reports` (xlsx/docx/
       dual-password PDF) + `GET /api/reports/{id}/{fmt}` download, wired to the
       screen's generate flow (open + owner passwords)

@@ -41,6 +41,7 @@
   const STATUS_LABEL = {
     open: "Open", triaged: "Triaged", in_progress: "In Progress",
     retest: "Awaiting Retest", closed: "Closed", risk_accepted: "Risk Accepted",
+    confirmed_fp: "False Positive",
   };
   window.STATUS_LABEL = STATUS_LABEL;
   function StatusPill({ status }) {

@@ -154,6 +154,24 @@ Body: `{ "findingId": "VLN-…", "requestedBy": "<name>", "durationMonths": <int
   approver:<tier full name>, reviewDate:"—", reason:<documentedRisk>}`; audit
   `EXCEPTION_REQUESTED`. Returns `{ "exception": Exception, "tier": "<CISO|RMC|Board>" }`.
 
+### `POST /api/findings/{id}/false-positive` — FP confirm/clear (role: `analyst`)
+Body: `{ "decision": "confirm" | "clear", "note"?: "<text>" }`.
+- `confirm` → status `confirmed_fp` (treated as **closed** — excluded from open
+  counts); `clear` → status `triaged`. Sets `humanValidatedBy/At` (server actor).
+- Audited `FINDING_FP_CONFIRMED` / `FINDING_FP_CLEARED`. Returns `{ "finding": Finding }`.
+- 422 invalid `decision`; 404 unknown id; 403 if not `analyst`/`admin`.
+
+### `POST /api/exceptions/{id}/decision` — approve/reject (role: the exception's tier)
+Body: `{ "decision": "approve" | "reject", "note"?: "<text>" }`.
+- **Authorized by the exception's tier:** CISO→`approver_ciso`, RMC→`approver_rmc`,
+  Board→`approver_board` (`admin` always). Wrong role → **403**.
+- Only `requested`/`pending` exceptions are decidable → else **422** `not_decidable`.
+- `approve` → exception `approved` (+ `reviewDate` today) **and the linked finding
+  becomes `risk_accepted`** — this is the ONLY path to `risk_accepted` (the generic
+  status PATCH still rejects it). Audited `EXCEPTION_APPROVED` + `FINDING_RISK_ACCEPTED`.
+- `reject` → exception `rejected`. Audited `EXCEPTION_REJECTED`.
+- Returns `{ "exception": Exception, "finding": Finding | null }`. 404 unknown id.
+
 ### `GET /api/audit?limit=N`
 Returns `{ "audit": [ { "seq", "ts", "actor", "action", "entityType", "entityId", "summary" }, … ] }`, most-recent first. Simplified in-memory mirror of the
 hash-chained `audit_log` table.

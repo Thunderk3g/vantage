@@ -50,6 +50,14 @@ DUE_SOON_DAYS = 7  # daysLeft within [0, 7] counts as "due soon"
 # is not human-settable here either.
 ALLOWED_STATUSES = {"open", "triaged", "in_progress", "retest", "closed"}
 
+# Exception approval tier -> the role authorized to decide it. ADMIN is always a
+# wildcard. risk_accepted is reachable ONLY via an approved exception (below).
+_TIER_ROLE = {
+    "CISO": Role.APPROVER_CISO,
+    "RMC": Role.APPROVER_RMC,
+    "Board": Role.APPROVER_BOARD,
+}
+
 
 def _err(status_code: int, error: str, detail: str) -> JSONResponse:
     """Contract error body: {"error","detail"} with the given status code."""
@@ -332,6 +340,103 @@ def request_exception(
         summary=f"{tier} exception requested for {finding_id} ({duration_months}mo) by {requested_by}",
     )
     return JSONResponse(status_code=201, content={"exception": exc, "tier": tier})
+
+
+# ---------------------------------------------------------------------------
+# Governance workflows (v0.1) — false-positive confirm/clear and exception
+# approve/reject. Same human-gating contract as above: the acting identity is
+# server-derived via session_actor(user) (never from the body); every mutation
+# is audited; error bodies follow {"error","detail"}. risk_accepted is reachable
+# ONLY through an approved exception (set_finding_risk_accepted, below) — the
+# generic PATCH /status still rejects it.
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/findings/{finding_id}/false-positive")
+def decide_false_positive(
+    finding_id: str,
+    body: dict = Body(...),
+    user: User = Depends(require_role(Role.ANALYST)),
+):
+    decision = body.get("decision")
+    if decision not in ("confirm", "clear"):
+        return _err(422, "invalid_decision", "decision must be 'confirm' or 'clear'")
+
+    actor = session_actor(user)
+    updated = seed.set_false_positive(finding_id, decision == "confirm", actor, TODAY_ISO)
+    if updated is None:
+        return _err(404, "not_found", f"Finding not found: {finding_id}")
+
+    if decision == "confirm":
+        action = "FINDING_FP_CONFIRMED"
+        summary = f"false positive confirmed (status confirmed_fp) by {actor}"
+    else:
+        action = "FINDING_FP_CLEARED"
+        summary = f"false positive cleared (status triaged) by {actor}"
+    seed.record_audit(
+        actor=actor,
+        action=action,
+        entity_type="finding",
+        entity_id=finding_id,
+        summary=summary,
+    )
+    return {"finding": updated}
+
+
+@app.post("/api/exceptions/{exception_id}/decision")
+def decide_exception(
+    exception_id: str,
+    body: dict = Body(...),
+    user: User = Depends(get_current_user),
+):
+    decision = body.get("decision")
+    if decision not in ("approve", "reject"):
+        return _err(422, "invalid_decision", "decision must be 'approve' or 'reject'")
+
+    exc = seed.find_exception(exception_id)
+    if exc is None:
+        return _err(404, "not_found", f"Exception not found: {exception_id}")
+
+    if exc["status"] not in ("requested", "pending"):
+        return _err(422, "not_decidable", f"exception already {exc['status']}")
+
+    # RBAC by tier: only the tier's approver role (or admin) may decide.
+    required = _TIER_ROLE.get(exc["tier"])
+    if Role.ADMIN.value not in user.roles and (required is None or required.value not in user.roles):
+        return _err(403, "forbidden", f"requires the {exc['tier']} approver role")
+
+    actor = session_actor(user)
+    today = TODAY_ISO
+
+    if decision == "approve":
+        updated = seed.update_exception(exception_id, "approved", today)
+        fin = seed.set_finding_risk_accepted(exc["finding"], actor, today)
+        seed.record_audit(
+            actor=actor,
+            action="EXCEPTION_APPROVED",
+            entity_type="exception",
+            entity_id=exception_id,
+            summary=f"{exc['tier']} exception {exception_id} approved by {actor}",
+        )
+        seed.record_audit(
+            actor=actor,
+            action="FINDING_RISK_ACCEPTED",
+            entity_type="finding",
+            entity_id=exc["finding"],
+            summary=f"{exc['finding']} risk_accepted via approved exception {exception_id} by {actor}",
+        )
+        return {"exception": updated, "finding": fin}
+
+    # reject
+    updated = seed.update_exception(exception_id, "rejected", today)
+    seed.record_audit(
+        actor=actor,
+        action="EXCEPTION_REJECTED",
+        entity_type="exception",
+        entity_id=exception_id,
+        summary=f"{exc['tier']} exception {exception_id} rejected by {actor}",
+    )
+    return {"exception": updated, "finding": None}
 
 
 @app.get("/api/audit")

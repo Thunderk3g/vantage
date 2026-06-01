@@ -44,6 +44,29 @@
     const [validatedAt, setValidatedAt] = useState(f.humanValidatedAt ? new Date(f.humanValidatedAt) : null);
     const [note, setNote] = useState("");
 
+    // False-positive confirm/clear. Shares the saving/saveErr/saved banner state
+    // with the status save so only one network op is in flight at a time and the
+    // success/error surfaces are consistent. `decision` is "confirm" | "clear".
+    function decideFalsePositive(decision) {
+      if (saving) return;
+      setSaving(true);
+      setSaveErr(null);
+      setSaved(false);
+      window.api.setFalsePositive(f.id, { decision: decision })
+        .then(updated => {
+          setStatus(updated.status);
+          setPick(updated.status);
+          if (updated.humanValidatedBy) setValidatedBy(updated.humanValidatedBy);
+          if (updated.humanValidatedAt) setValidatedAt(new Date(updated.humanValidatedAt));
+          setSaved(true);
+        })
+        .catch(err => {
+          // Never fake success: keep the displayed status, surface the message.
+          setSaveErr(err && err.message ? err.message : "Failed to update false-positive state.");
+        })
+        .finally(() => setSaving(false));
+    }
+
     function saveStatus() {
       if (saving || pick === status) return; // deliberate, no-op when unchanged
       setSaving(true);
@@ -111,6 +134,18 @@ Authorization: Bearer <policyholder-A token>
                   <button className="btn sm" disabled={saving}><Icon.user size={14} /> Reassign</button>
                   <button className="btn sm" disabled={saving} onClick={() => go("exception", { finding: f.id })}><Icon.exception size={14} /> Request exception</button>
                   <button className="btn sm" disabled={saving}><Icon.history size={14} /> Request retest</button>
+                  {status === "confirmed_fp" ? (
+                    <button className="btn sm ghost" disabled={saving || !allowed} onClick={() => decideFalsePositive("clear")}
+                      title={allowed ? undefined : "requires the analyst role"}>
+                      <Icon.flag size={14} /> Clear false positive
+                    </button>
+                  ) : (
+                    <button className="btn sm" disabled={saving || !allowed} onClick={() => decideFalsePositive("confirm")}
+                      title={allowed ? undefined : "requires the analyst role"}
+                      style={{ color: "var(--warn-text, oklch(0.5 0.11 70))", borderColor: "var(--sev-medium-border, var(--border))" }}>
+                      <Icon.flag size={14} /> Mark false positive
+                    </button>
+                  )}
                   <div className="spacer" />
                   <button className="btn primary sm" disabled={saving || pick === status || !allowed} onClick={saveStatus}
                     title={allowed ? undefined : "requires the analyst role"}>

@@ -22,6 +22,11 @@ TODAY: date = date(2026, 6, 1)
 # Critical & High = 30 days, Medium & Low = 60, Info = null.
 SLA_DAYS = {"critical": 30, "high": 30, "medium": 60, "low": 60, "info": None}
 
+# ---- Closed-status set (an open risk vs. a resolved one) ----
+# A finding counts as NOT an open risk when closed, accepted as risk, OR
+# confirmed a false positive. Used for the ``isClosed`` derivation everywhere.
+_CLOSED_STATUSES = {"closed", "risk_accepted", "confirmed_fp"}
+
 
 # ---- Date helpers (port of data.js addDays / daysBetween / fmtDate) ----
 def add_days(d: date, n: int) -> date:
@@ -96,7 +101,7 @@ def _derive_findings():
         discovered = add_days(TODAY, -days_ago)
         sla_days = SLA_DAYS[severity]
         deadline = add_days(discovered, sla_days) if sla_days is not None else None
-        is_closed = status in ("closed", "risk_accepted")
+        is_closed = status in _CLOSED_STATUSES
         days_left = days_between(TODAY, deadline) if deadline is not None else None
 
         # Escalation stage: derived exactly as in frontend/data.js.
@@ -339,10 +344,49 @@ def update_finding_status(finding_id: str, status: str, actor: str, validated_at
     if f is None:
         return None
     f["status"] = status
-    f["isClosed"] = status in ("closed", "risk_accepted")
+    f["isClosed"] = status in _CLOSED_STATUSES
     f["humanValidatedBy"] = actor
     f["humanValidatedAt"] = validated_at
     store.save_finding_state(finding_id, status, actor, validated_at)
+    return dict(f)
+
+
+def set_false_positive(finding_id: str, confirm: bool, actor: str, validated_at: str) -> Optional[dict]:
+    """Confirm/clear a false positive on a finding; returns a copy (None if unknown).
+
+    ``confirm`` -> status ``confirmed_fp`` (a confirmed FP is not an open risk);
+    ``clear``  -> status ``triaged`` (back into the triage workflow). Recomputes
+    ``isClosed`` via ``_CLOSED_STATUSES``, stamps the human-validation fields and
+    write-throughs to the persistence overlay (``store``) — DB-backed when
+    configured, silent no-op otherwise (mirrors update_finding_status above).
+    """
+    f = find_finding(finding_id)
+    if f is None:
+        return None
+    status = "confirmed_fp" if confirm else "triaged"
+    f["status"] = status
+    f["isClosed"] = status in _CLOSED_STATUSES
+    f["humanValidatedBy"] = actor
+    f["humanValidatedAt"] = validated_at
+    store.save_finding_state(finding_id, status, actor, validated_at)
+    return dict(f)
+
+
+def set_finding_risk_accepted(finding_id: str, actor: str, validated_at: str) -> Optional[dict]:
+    """Flip a finding to ``risk_accepted``; returns a copy (None if unknown).
+
+    The ONLY path to ``risk_accepted`` — reached server-side when an exception is
+    approved (see main.py). Recomputes ``isClosed``, stamps human-validation
+    fields and write-throughs to the overlay (DB-backed when configured).
+    """
+    f = find_finding(finding_id)
+    if f is None:
+        return None
+    f["status"] = "risk_accepted"
+    f["isClosed"] = "risk_accepted" in _CLOSED_STATUSES
+    f["humanValidatedBy"] = actor
+    f["humanValidatedAt"] = validated_at
+    store.save_finding_state(finding_id, "risk_accepted", actor, validated_at)
     return dict(f)
 
 
@@ -438,6 +482,46 @@ def add_exception(finding: dict, requested_by: str, duration_months: int, docume
     return dict(exc), tier
 
 
+def find_exception(exception_id: str) -> Optional[dict]:
+    """Return the exception dict from the MERGED view (seed + overlay), or None.
+
+    Reads through ``exceptions()`` so a persisted decision (the overlay) wins
+    over the seed row — the same merge-by-id used by the read endpoints.
+    """
+    for e in exceptions():
+        if e["id"] == exception_id:
+            return e
+    return None
+
+
+def update_exception(exception_id: str, status: str, review_date: str) -> Optional[dict]:
+    """Update an exception's ``status`` + ``reviewDate``; returns a copy (None if unknown).
+
+    Mutates the in-memory seed row when present; otherwise starts from the
+    persisted/merged copy. ALWAYS write-throughs ``store.save_exception(...)`` so
+    the decision persists / overrides the seed default (mirrors the overlay
+    write-through pattern used for findings/scans above).
+    """
+    row = None
+    for e in _EXCEPTIONS:
+        if e["id"] == exception_id:
+            row = e
+            break
+    if row is not None:
+        row["status"] = status
+        row["reviewDate"] = review_date
+        updated = dict(row)
+    else:
+        merged = find_exception(exception_id)
+        if merged is None:
+            return None
+        merged["status"] = status
+        merged["reviewDate"] = review_date
+        updated = merged
+    store.save_exception(updated)
+    return dict(updated)
+
+
 def _merge_by_id(seed_rows: list[dict], persisted_rows: list[dict]) -> list[dict]:
     """Merge seed + persisted rows de-duped by ``id``, persisted version winning.
 
@@ -474,7 +558,7 @@ def findings():
         rec = state.get(f["id"]) if state else None
         if rec is not None:
             f["status"] = rec["status"]
-            f["isClosed"] = rec["status"] in ("closed", "risk_accepted")
+            f["isClosed"] = rec["status"] in _CLOSED_STATUSES
             f["humanValidatedBy"] = rec.get("humanValidatedBy")
             f["humanValidatedAt"] = rec.get("humanValidatedAt")
         out.append(f)
