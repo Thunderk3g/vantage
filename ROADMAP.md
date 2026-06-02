@@ -129,12 +129,19 @@ Keep it honest: check a box only when the exit criteria are met and verified.
 ## Phase 4 — Governance & lifecycle  `target: 3 wks`
 **Exit:** full SLA / escalation / exception lifecycle running.
 
-- [ ] Escalation staircase automation (Day 0 → 2 → 4 → 8–10 → 15–20)
-- [ ] Exception routing UI + approvals (CISO / RMC / Board)
+- [x] Escalation staircase automation (Day 0 → 2 → 4 → 8–10 → 15–20) —
+      `escalation.py` (deterministic engine: 5-stage ladder, who-it's-with,
+      due-for-escalation) + `GET /api/escalations` rollup; SLA tracker renders it.
+- [x] Exception routing UI + approvals (CISO / RMC / Board) — tier-gated
+      approve/reject (`POST /api/exceptions/{id}/decision`); approval is the only
+      path to `risk_accepted`.
 - [ ] Retest / diff flow (closure verification vs prior scan)
-- [ ] Notification service + ITSM integration (Jira / ServiceNow)
+- [~] Notification service + ITSM integration (Jira / ServiceNow) — `notifications.py`
+      (Notifier + log/in-memory/webhook sinks, dedupe ledger, Jira-shaped ITSM
+      payload) wired to `POST /api/escalations/run` (admin sweep). **Remaining:**
+      point the webhook sink at a real Jira/ServiceNow endpoint (config).
 - [ ] Scheduler with cadence + blackout calendars
-      (internal 2×/yr · public 2×/yr · CIS 1×/yr)
+      (internal 2×/yr · public 2×/yr · CIS 1×/yr) — would drive the sweep on a timer
 
 ## Phase 5 — OSS variant & hardening  `target: 2–3 wks`
 **Exit:** license-free pipeline at parity; audit-ready.

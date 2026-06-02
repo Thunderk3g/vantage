@@ -194,6 +194,26 @@
       }
     },
 
+    // ---- Escalations ---------------------------------------------------------
+    // GET /api/escalations → the server-side rollup { today, ladder, stageCounts,
+    // findings, due, counts }. On any error, fall back to a client-computed object
+    // of the SAME shape (from window.FINDINGS + window.ESCALATION) so the SLA
+    // tracker still renders offline.
+    async escalations() {
+      try {
+        return await getJSON("/api/escalations");
+      } catch (err) {
+        warnOnce("GET /api/escalations", err);
+        return computeEscalationsFromMock();
+      }
+    },
+    // POST /api/escalations/run (admin only) — fires the escalation sweep. Throws
+    // on failure (incl. 403 for non-admins); never fakes success. Returns
+    // { dispatched, count, ranAt }.
+    runEscalations() {
+      return sendJSON("/api/escalations/run", {}, "POST");
+    },
+
     // ---- Writes (human-gated; throw on failure, NO silent fallback) --------
     // PATCH a finding's status. Returns the updated (hydrated) finding.
     setFindingStatus(id, body) {
@@ -254,6 +274,67 @@
       openBySeverity: openBySeverity,
       counts: { open: open.length, overdue: overdue, dueSoon: dueSoon, scansRunning: scansRunning },
       trend: window.TREND || [],
+    };
+  }
+
+  // Build the escalation rollup from the mock, matching /api/escalations shape.
+  // Mirrors the server: ladder/stageCounts/findings/due/counts derived from
+  // window.FINDINGS + window.ESCALATION. Dates stay as-is (the screen reads
+  // daysLeft/role text, and hydrates chip data from api.findings() separately).
+  function computeEscalationsFromMock() {
+    const ESC = window.ESCALATION || [];
+    const all = window.FINDINGS || [];
+    const lastStage = Math.max(ESC.length - 1, 0);
+
+    const ladder = ESC.map(function (s, i) {
+      return { stage: i, day: s.day, label: s.label, role: s.role };
+    });
+
+    const records = all.map(function (f) {
+      const stage = f.escStage || 0;
+      const next = ESC[Math.min(stage + 1, lastStage)] || {};
+      const overdue = f.daysLeft != null && f.daysLeft < 0;
+      const dueForEscalation = !f.isClosed && !!f.deadline && (overdue || stage >= 3);
+      return {
+        id: f.id,
+        title: f.title,
+        severity: f.severity,
+        assetId: f.assetId,
+        asset: f.asset,
+        owner: f.owner,
+        assetOwner: f.assetOwner,
+        deadline: f.deadline,
+        daysLeft: f.daysLeft,
+        escStage: stage,
+        stageLabel: (ESC[stage] && ESC[stage].label) || "",
+        role: (ESC[stage] && ESC[stage].role) || "",
+        nextRole: next.role || "",
+        nextDay: next.day != null ? next.day : null,
+        overdue: overdue,
+        dueForEscalation: dueForEscalation,
+      };
+    });
+
+    // Only findings actually under SLA (open + has a deadline) belong in the
+    // pipeline; matches what the server counts.
+    const active = records.filter(function (r) { return !!r.deadline; })
+      .filter(function (r) {
+        const f = all.find(function (x) { return x.id === r.id; });
+        return f && !f.isClosed;
+      });
+    const stageCounts = ESC.map(function (_s, i) {
+      return active.filter(function (r) { return r.escStage === i; }).length;
+    });
+    const due = active.filter(function (r) { return r.dueForEscalation; });
+    const overdueCount = active.filter(function (r) { return r.overdue; }).length;
+
+    return {
+      today: "2026-06-02",
+      ladder: ladder,
+      stageCounts: stageCounts,
+      findings: active,
+      due: due,
+      counts: { active: active.length, overdue: overdueCount, due: due.length },
     };
   }
 

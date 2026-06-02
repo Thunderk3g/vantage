@@ -124,7 +124,7 @@
       case "scan": Screen = <window.StartScan go={go} user={user} />; break;
       case "findings": Screen = <window.Findings initial={params} go={go} />; break;
       case "detail": Screen = <window.FindingDetail id={params.id} go={go} user={user} />; break;
-      case "sla": Screen = <window.SLATracker go={go} />; break;
+      case "sla": Screen = <window.SLATracker go={go} user={user} />; break;
       case "exception": Screen = <window.Exceptions initial={params} go={go} user={user} />; break;
       case "reports": Screen = <window.Reports go={go} user={user} />; break;
       case "system": Screen = <window.DesignSystem />; break;

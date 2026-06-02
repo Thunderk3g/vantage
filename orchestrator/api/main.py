@@ -27,6 +27,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from . import seed
 from .auth import Role, User, get_current_user, require_role, session_actor, router as auth_router
 from orchestrator.reporting.export import build_xlsx, build_docx, build_pdf
+from orchestrator import escalation, notifications
 
 app = FastAPI(title="Vantage API", version="0", description="Read-only vulnerability-scanner console API.")
 
@@ -442,6 +443,58 @@ def decide_exception(
 @app.get("/api/audit")
 def get_audit(limit: Optional[int] = Query(None, ge=1), user: User = Depends(get_current_user)):
     return {"audit": seed.audit(limit)}
+
+
+# ---------------------------------------------------------------------------
+# Escalation staircase (Day 0→2→4→8-10→15-20) + notification sweep.
+# GET reports the current ladder/rollup (read). POST runs a sweep: it computes
+# which findings are DUE for escalation and dispatches notifications via the
+# notification service (log + in-memory sinks; a webhook/ITSM sink is the
+# production plug-in). This NEVER acts on a target — it only notifies humans.
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/escalations")
+def list_escalations(user: User = Depends(get_current_user)):
+    roll = escalation.build_escalations(seed.findings(), seed.TODAY)
+    return {"today": TODAY_ISO, **roll}
+
+
+@app.post("/api/escalations/run")
+def run_escalations(user: User = Depends(require_role(Role.ADMIN))):
+    """Compute due escalations and dispatch notifications (admin-gated, audited).
+
+    Deterministic + side-effect-light: the sweep emits to a log sink and an
+    in-memory sink; wiring a real ITSM/webhook sink (Jira/ServiceNow) is a
+    config change in the notification service. Returns what was dispatched.
+    """
+    roll = escalation.build_escalations(seed.findings(), seed.TODAY)
+    notifier = notifications.Notifier([notifications.LogSink(), notifications.InMemorySink()])
+    results = notifier.notify_escalations(roll["due"])
+
+    dispatched = []
+    for r in results:
+        n = r.get("notification", {})
+        dispatched.append({
+            "findingId": n.get("finding_id"),
+            "stage": n.get("stage"),
+            "role": n.get("role"),
+            "severity": n.get("severity"),
+            "kind": n.get("kind"),
+            "message": n.get("message"),
+            "channels": r.get("channels", []),
+            "deduped": r.get("deduped", False),
+        })
+
+    ran_at = datetime.now(timezone.utc).isoformat()
+    seed.record_audit(
+        actor=session_actor(user),
+        action="ESCALATION_SWEEP",
+        entity_type="escalation",
+        entity_id="sweep",
+        summary=f"escalation sweep dispatched {len(dispatched)} notification(s)",
+    )
+    return {"dispatched": dispatched, "count": len(dispatched), "ranAt": ran_at}
 
 
 # ---------------------------------------------------------------------------

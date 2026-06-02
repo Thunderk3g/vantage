@@ -176,6 +176,31 @@ Body: `{ "decision": "approve" | "reject", "note"?: "<text>" }`.
 Returns `{ "audit": [ { "seq", "ts", "actor", "action", "entityType", "entityId", "summary" }, … ] }`, most-recent first. Simplified in-memory mirror of the
 hash-chained `audit_log` table.
 
+### `GET /api/escalations` — escalation staircase rollup (any authenticated user)
+Returns the Day 0→2→4→9→18 ladder and per-finding escalation state:
+```json
+{ "today": "2026-06-02",
+  "ladder": [ {"stage":0,"day":0,"label":"Owner notified","role":"Asset Owner"}, … 5 ],
+  "stageCounts": [n0,n1,n2,n3,n4],
+  "findings": [ {"id","title","severity","assetId","asset","owner","assetOwner",
+    "deadline","daysLeft","escStage","stageLabel","role","nextRole","nextDay",
+    "overdue":bool,"dueForEscalation":bool}, … ],
+  "due": [ …subset where dueForEscalation… ],
+  "counts": { "active": N, "overdue": M, "due": K } }
+```
+Derived deterministically from the findings (server reuses `escStage`/`daysLeft`).
+
+### `POST /api/escalations/run` — run a notification sweep (role: `admin`)
+Computes the `due` escalations and dispatches a notification per finding via the
+notification service (log + in-memory sinks; a webhook/ITSM sink is the prod
+plug-in). **Notifies humans only — never acts on a target.** Audited
+`ESCALATION_SWEEP`. **200** →
+```json
+{ "dispatched": [ {"findingId","stage","role","severity","kind","message","channels":[…],"deduped":bool}, … ],
+  "count": K, "ranAt": "<iso>" }
+```
+Dedupe: a `(finding, stage)` already dispatched in the run is skipped. 403 if not `admin`.
+
 ### `POST /api/reports` — generate a report
 Body: `{ "template": "audit|exec|asset|sla", "scope": "all|<assetId>", "formats": ["xlsx","docx","pdf"], "openPassword"?: "<str>", "ownerPassword"?: "<str>", "by": "<name>" }`
 - `by` required (human actor) → 422.

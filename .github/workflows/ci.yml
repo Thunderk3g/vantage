@@ -33,7 +33,7 @@ jobs:
             api/__init__.py api/seed.py api/main.py api/db.py api/auth.py api/store.py \
             triage/__init__.py triage/maps.py triage/engine.py \
             reporting/__init__.py reporting/export.py \
-            normalization.py pipeline.py
+            normalization.py pipeline.py escalation.py notifications.py
       - name: Scope-boundary invariants (the scan-and-report guarantee, as a test)
         working-directory: orchestrator
         run: python test_scope_invariants.py
@@ -52,6 +52,11 @@ jobs:
       - name: Seed persistence overlay test (in-memory fallback; injected store)
         working-directory: orchestrator
         run: python api/test_seed_overlay.py
+      - name: Escalation engine + notification service (stdlib only)
+        working-directory: orchestrator
+        run: |
+          python test_escalation.py
+          python test_notifications.py
       - name: End-to-end pipeline test (fixtures -> adapters -> normalize -> triage)
         working-directory: orchestrator
         run: python test_pipeline_e2e.py
@@ -68,6 +73,8 @@ jobs:
         run: |
           pip install "fastapi>=0.110" httpx
           python orchestrator/api/test_fp_exception_workflow.py
+      - name: Escalation API (ladder rollup + admin-gated notification sweep)
+        run: python orchestrator/api/test_escalations_api.py
       - name: Guard — no exploitation phase may be introduced
         run: |
           if grep -rniE "phase\s*=\s*['\"]?(exploit|post_exploit|lateral|remediate)" orchestrator db; then
