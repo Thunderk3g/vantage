@@ -176,6 +176,21 @@ Body: `{ "decision": "approve" | "reject", "note"?: "<text>" }`.
 Returns `{ "audit": [ { "seq", "ts", "actor", "action", "entityType", "entityId", "summary" }, … ] }`, most-recent first. Simplified in-memory mirror of the
 hash-chained `audit_log` table.
 
+### `POST /api/scans/live` — start a REAL scope-gated scan (role: `analyst`)
+Body `{ "target": "<host>", "mode": "full"|"recon" }`. Triggers a live `nmap`
+scan (async) of an **authorized** target only: loopback / `host.docker.internal`
+/ a HOD-approved-inventory host. **Fail-closed:** an out-of-scope target → **403**
+`out_of_scope` (audited `LIVE_SCAN_DENIED`), before any job is created. On accept
+→ **202** `{ "jobId":"LSCAN-…", "status":"queued", "target", "mode" }` (audited
+`LIVE_SCAN_REQUESTED`). 422 on bad `mode`. The scan is non-intrusive (`-sT` +
+version + safe NSE, argv/no-shell); nmap runs in the API image.
+
+### `GET /api/scans/live/{jobId}` — poll a live scan (any authenticated user)
+`{ "jobId", "status":"queued"|"running"|"done"|"error", "target", "mode",
+"findingCount":int|null, "register":[Finding…]|null, "error":str|null }`. 404 if
+unknown. `done` with `register` = the triaged findings; `error` carries the engine
+message (e.g. nmap missing). Jobs are in-memory/ephemeral in the reference build.
+
 ### `GET /api/scan-diff` — diff two scan registers (any authenticated user)
 Compares the **licensed** engine set (baseline / "previous scan") against the
 **OSS** engine set (current / "latest scan") by finding signature (the triage

@@ -241,6 +241,21 @@
     requestException(body) {
       return sendJSON("/api/exceptions", body, "POST");
     },
+    // ---- Live scan (real nmap) ----------------------------------------------
+    // POST /api/scans/live (role analyst/admin) — kick off a REAL nmap scan.
+    // body { target, mode:"full"|"recon" }. Returns 202 { jobId, status, target,
+    // mode }. The server enforces the scope gate: out-of-scope/invalid throws an
+    // Error carrying .status (403/422) and .data ({error, detail}). No fallback —
+    // a failed start must surface so the UI never fakes a running scan.
+    startLiveScan(body) {
+      return sendJSON("/api/scans/live", body, "POST");
+    },
+    // GET /api/scans/live/{jobId} (any authenticated user) — poll a live-scan
+    // job. Returns { jobId, status, target, mode, findingCount, register, error }.
+    // Lets errors (incl. 404 unknown job) propagate so the poller can react.
+    async getLiveScan(jobId) {
+      return getJSON("/api/scans/live/" + encodeURIComponent(jobId));
+    },
     // Confirm/clear a finding as a false positive. Returns the updated finding.
     setFalsePositive(id, body) {
       return sendJSON("/api/findings/" + encodeURIComponent(id) + "/false-positive", body, "POST")

@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import secrets
 import tempfile
+import threading
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -695,6 +696,71 @@ def create_report(
         status_code=201,
         content={"reportId": report_id, "generatedAt": generated_at, "files": files},
     )
+
+
+# --- Live-scan jobs (UI-triggerable, scope-gated nmap) ------------------------
+# In-memory live-scan jobs (ephemeral; this is the reference build). Each job:
+# {jobId, status, target, mode, requestedBy, findingCount, register, error, created}.
+_LIVE_JOBS: dict[str, dict] = {}
+_LIVE_LOCK = threading.Lock()
+_LIVE_VALID_MODES = ("full", "recon")
+
+
+def _run_live_job(job_id: str, target: str, mode: str) -> None:
+    with _LIVE_LOCK:
+        if job_id in _LIVE_JOBS:
+            _LIVE_JOBS[job_id]["status"] = "running"
+    try:
+        from orchestrator import run_scan
+        result = run_scan.run_live_scan(target, mode=mode, today=seed.TODAY)
+        with _LIVE_LOCK:
+            if job_id in _LIVE_JOBS:
+                _LIVE_JOBS[job_id].update(status="done",
+                    register=result.get("register", []),
+                    findingCount=result.get("findingCount", 0))
+    except Exception as exc:  # nmap missing / scan error -> surfaced as job error
+        with _LIVE_LOCK:
+            if job_id in _LIVE_JOBS:
+                _LIVE_JOBS[job_id].update(status="error", error=str(exc))
+
+
+@app.post("/api/scans/live")
+def start_live_scan(body: dict = Body(...),
+                    user: User = Depends(require_role(Role.ANALYST, Role.ADMIN))):
+    """Start a REAL, scope-gated nmap scan (async). Fail-closed: an out-of-scope
+    target is refused (403) before any job is created. Returns a jobId to poll."""
+    target = str(body.get("target") or "").strip()
+    mode = str(body.get("mode") or "full").strip()
+    if mode not in _LIVE_VALID_MODES:
+        return _err(422, "invalid_mode", f"mode must be one of {list(_LIVE_VALID_MODES)}")
+    from orchestrator import run_scan
+    if not target or not run_scan.is_authorized(target):
+        seed.record_audit(actor=session_actor(user), action="LIVE_SCAN_DENIED",
+            entity_type="scan", entity_id=target or "(empty)",
+            summary=f"live scan refused: {target!r} not in approved scope")
+        return _err(403, "out_of_scope",
+            f"{target!r} is not in the approved scan scope (loopback / host.docker.internal / HOD inventory)")
+    job_id = "LSCAN-" + secrets.token_urlsafe(8)
+    with _LIVE_LOCK:
+        _LIVE_JOBS[job_id] = {"jobId": job_id, "status": "queued", "target": target,
+            "mode": mode, "requestedBy": session_actor(user), "findingCount": None,
+            "register": None, "error": None,
+            "created": datetime.now(timezone.utc).isoformat()}
+    threading.Thread(target=_run_live_job, args=(job_id, target, mode), daemon=True).start()
+    seed.record_audit(actor=session_actor(user), action="LIVE_SCAN_REQUESTED",
+        entity_type="scan", entity_id=job_id,
+        summary=f"live {mode} scan of {target} queued as {job_id}")
+    return JSONResponse(status_code=202,
+        content={"jobId": job_id, "status": "queued", "target": target, "mode": mode})
+
+
+@app.get("/api/scans/live/{job_id}")
+def get_live_scan(job_id: str, user: User = Depends(get_current_user)):
+    with _LIVE_LOCK:
+        job = _LIVE_JOBS.get(job_id)
+    if job is None:
+        return _err(404, "not_found", f"Live scan job not found: {job_id}")
+    return dict(job)
 
 
 @app.get("/api/reports/{report_id}/{fmt}")

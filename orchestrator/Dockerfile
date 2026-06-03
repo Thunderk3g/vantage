@@ -8,6 +8,13 @@ FROM python@sha256:090ba77e2958f6af52a5341f788b50b032dd4ca28377d2893dcf1ecbdfdfe
 
 WORKDIR /app
 
+# nmap for the live-scan endpoint (POST /api/scans/live). The endpoint is
+# RBAC-gated + scope-gated (fail-closed) at the app layer, and the scan is
+# non-intrusive (-sT connect + version + safe NSE, argv/no-shell), run as the
+# non-root appuser below.
+RUN apt-get update && apt-get install -y --no-install-recommends nmap \
+ && rm -rf /var/lib/apt/lists/*
+
 # The API needs FastAPI + uvicorn + psycopg (for the audit-log persistence),
 # plus the reporting engine's deps (openpyxl/python-docx/reportlab/pikepdf) so
 # the /api/reports endpoint can generate xlsx/docx and dual-password PDFs. The

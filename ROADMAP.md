@@ -41,6 +41,13 @@ Keep it honest: check a box only when the exit criteria are met and verified.
       runs with **no host install** (`docker compose run --rm scanner --target …`;
       verified: nmap 7.95 scans 127.0.0.1 in-container, 8.8.8.8 refused). Other
       engines (Burp/Nessus/ZAP/…) still stubbed.
+- [x] **Live scan from the console** — `POST /api/scans/live` (analyst/admin,
+      scope-gated fail-closed, async job) + `GET /api/scans/live/{jobId}` polling;
+      a "Live scan (nmap)" panel on Start-a-scan triggers it and renders the
+      triaged register. nmap is now in the API image; verified end-to-end through
+      the stack (202→running→done; out-of-scope 8.8.8.8 → 403). Posture note: this
+      is a *remotely-triggerable* scan endpoint, constrained by RBAC + the
+      fail-closed scope gate + safe-NSE/argv adapter.
 - [ ] Datastore layer (psycopg) behind the activity stubs
 - [~] RBAC / SSO (AD/LDAP + OIDC) — **code complete & tested** (`api/auth.py`:
       OIDC Auth-Code+PKCE, JWKS id_token validation, AD-group→role map, LDAP

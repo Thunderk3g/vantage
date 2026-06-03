@@ -93,6 +93,8 @@ jobs:
         run: python orchestrator/api/test_schedule_api.py
       - name: Scan-diff API + retest workflow
         run: python orchestrator/api/test_scan_diff.py
+      - name: Live-scan API (scope-gated async job; mocked scan, no nmap needed)
+        run: python orchestrator/api/test_live_scan_api.py
       - name: Guard — no exploitation phase may be introduced
         run: |
           if grep -rniE "phase\s*=\s*['\"]?(exploit|post_exploit|lateral|remediate)" orchestrator db; then

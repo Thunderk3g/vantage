@@ -1,7 +1,237 @@
 /* Start a scan — approved-inventory targets only, pipeline/type/auth config */
 (function () {
-  const { useState } = React;
+  const { useState, useEffect, useRef } = React;
   const { Icon, Empty } = window;
+
+  // ---- Live scan (real nmap) -------------------------------------------------
+  // Kicks off a REAL nmap scan via POST /api/scans/live and polls the job until
+  // it finishes. Targets are limited (in the UI) to loopback / host.docker.internal
+  // / approved infra hosts; the server is the real scope gate and refuses the rest
+  // with 403. Never fakes success — surfaces refusals and engine errors verbatim.
+  const POLL_MS = 2000;
+  const POLL_MAX = 60; // ~2 min cap so polling can never run forever.
+
+  function LiveScanPanel({ assets, user }) {
+    const allowed = window.can(user, "analyst");
+
+    // Build the authorized target list: loopback + docker host + approved infra hosts.
+    const infraHosts = (assets || [])
+      .filter((a) => a.type === "infra" && a.host)
+      .map((a) => ({ host: a.host, label: a.host + " — " + a.name }));
+    const targetOptions = [
+      { host: "127.0.0.1", label: "127.0.0.1 — loopback" },
+      { host: "host.docker.internal", label: "host.docker.internal — your host" },
+    ].concat(infraHosts);
+
+    const [target, setTarget] = useState("127.0.0.1");
+    const [mode, setMode] = useState("full");
+    const [job, setJob] = useState(null);     // latest job poll result
+    const [jobId, setJobId] = useState(null); // active job id (drives polling)
+    const [starting, setStarting] = useState(false);
+    const [refused, setRefused] = useState(null); // { target, message } on 403
+    const [startErr, setStartErr] = useState(null); // other start failures
+
+    const timerRef = useRef(null);
+    const triesRef = useRef(0);
+
+    function clearTimer() {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    }
+
+    // Poll the active job every POLL_MS until done/error or the try-cap is hit.
+    // Cleans up on unmount and whenever jobId changes.
+    useEffect(() => {
+      if (!jobId) return undefined;
+      let alive = true;
+      triesRef.current = 0;
+
+      async function tick() {
+        triesRef.current += 1;
+        try {
+          const j = await window.api.getLiveScan(jobId);
+          if (!alive) return;
+          setJob(j);
+          if (j.status === "done" || j.status === "error") {
+            clearTimer();
+          }
+        } catch (e) {
+          if (!alive) return;
+          // Surface the polling failure (e.g. 404 unknown job) and stop.
+          setJob({ status: "error", target: target, mode: mode, findingCount: null, register: null, error: (e && e.message) || "Lost contact with the scan job." });
+          clearTimer();
+        }
+        if (alive && triesRef.current >= POLL_MAX && timerRef.current) {
+          clearTimer();
+          setJob((prev) => (prev && (prev.status === "queued" || prev.status === "running"))
+            ? Object.assign({}, prev, { status: "error", error: "Timed out waiting for the scan to finish." })
+            : prev);
+        }
+      }
+
+      tick(); // poll immediately, then on an interval
+      timerRef.current = setInterval(tick, POLL_MS);
+      return () => { alive = false; clearTimer(); };
+      // eslint-disable-next-line
+    }, [jobId]);
+
+    function run() {
+      if (!allowed || starting) return;
+      // A scan is "in flight" while queued/running — block re-runs until it ends.
+      if (job && (job.status === "queued" || job.status === "running")) return;
+      setStarting(true);
+      setRefused(null);
+      setStartErr(null);
+      setJob(null);
+      setJobId(null);
+      clearTimer();
+      window.api.startLiveScan({ target: target, mode: mode })
+        .then((res) => {
+          setJob({ jobId: res.jobId, status: res.status || "queued", target: res.target || target, mode: res.mode || mode, findingCount: null, register: null, error: null });
+          setJobId(res.jobId);
+        })
+        .catch((e) => {
+          const oos = (e && e.status === 403) || (e && e.data && e.data.error === "out_of_scope");
+          if (oos) {
+            setRefused({ target: target, message: "Refused: " + target + " is not in the approved scan scope." });
+          } else {
+            setStartErr((e && e.message) || "The live scan could not be started.");
+          }
+        })
+        .then(() => { setStarting(false); });
+    }
+
+    const inFlight = job && (job.status === "queued" || job.status === "running");
+    const running = starting || inFlight;
+    const reg = (job && Array.isArray(job.register)) ? job.register : [];
+
+    return (
+      <div className="card card-pad col gap4">
+        <div className="row gap2" style={{ alignItems: "center" }}>
+          <span style={{ color: "var(--accent-text)" }}><Icon.target size={18} /></span>
+          <span className="t-h3">Live scan (nmap)</span>
+          <span className="chip" style={{ marginLeft: "auto" }}>real engine</span>
+        </div>
+        <div className="page-sub" style={{ marginTop: -4 }}>
+          Run a real nmap scan against an authorized host and watch the register populate.
+          Only loopback, the Docker host, and approved infrastructure hosts may be scanned.
+        </div>
+
+        <div className="grid" style={{ gridTemplateColumns: "2fr 1fr", gap: 12, alignItems: "end" }}>
+          <div className="col gap2">
+            <span className="t-xs faint">Target</span>
+            <select className="select" value={target} onChange={(e) => setTarget(e.target.value)} disabled={running}>
+              {targetOptions.map((o) => (
+                <option key={o.host} value={o.host}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="col gap2">
+            <span className="t-xs faint">Mode</span>
+            <div className="seg">
+              <button className={mode === "full" ? "on" : ""} disabled={running} onClick={() => setMode("full")}>full</button>
+              <button className={mode === "recon" ? "on" : ""} disabled={running} onClick={() => setMode("recon")}>recon</button>
+            </div>
+          </div>
+        </div>
+
+        <div className="row gap3" style={{ alignItems: "center" }}>
+          <button className="btn primary" onClick={run}
+            disabled={!allowed || running}
+            title={allowed ? undefined : "requires the analyst role"}>
+            {running ? <><Icon.shield size={14} /> Scanning…</> : <><Icon.play size={14} /> Run live scan</>}
+          </button>
+          {running && <span className="t-xs faint mono">{job && job.jobId ? job.jobId : "starting…"}</span>}
+        </div>
+
+        {/* Refusal banner — server scope gate (403 / out_of_scope) */}
+        {refused && (
+          <div className="card card-pad row gap3" style={{ alignItems: "flex-start", borderColor: "var(--danger)", background: "var(--danger-bg, var(--err-bg, var(--accent-soft)))" }}>
+            <span style={{ color: "var(--danger)", marginTop: 1, flexShrink: 0 }}><Icon.lock size={18} /></span>
+            <div className="col gap1">
+              <span className="t-sm" style={{ fontWeight: 700, color: "var(--danger)" }}>Out of scope</span>
+              <span className="t-sm">{refused.message}</span>
+            </div>
+          </div>
+        )}
+
+        {/* Other start failures (network / 422 / unexpected) */}
+        {startErr && (
+          <div className="card card-pad row gap3" style={{ alignItems: "flex-start", borderColor: "var(--danger)", background: "var(--danger-bg, var(--err-bg, var(--accent-soft)))" }}>
+            <span style={{ color: "var(--danger)", marginTop: 1, flexShrink: 0 }}><Icon.alert size={18} /></span>
+            <div className="col gap1">
+              <span className="t-sm" style={{ fontWeight: 700, color: "var(--danger)" }}>Scan could not be started</span>
+              <span className="t-sm">{startErr}</span>
+            </div>
+          </div>
+        )}
+
+        {/* Live job state */}
+        {job && (
+          <div className="col gap3">
+            <div className="row gap2 wrap t-sm" style={{ alignItems: "center" }}>
+              <span className="faint">Status:</span>
+              <span className="chip">{job.status}</span>
+              <span className="chip mono">{job.target}</span>
+              <span className="chip">{job.mode}</span>
+              {inFlight && <span className="t-xs faint">Scanning {job.target}… polling every {POLL_MS / 1000}s.</span>}
+            </div>
+
+            {/* Engine error — phrased as a scan-engine fault (e.g. nmap not on PATH) */}
+            {job.status === "error" && (
+              <div className="card card-pad row gap3" style={{ alignItems: "flex-start", borderColor: "var(--danger)", background: "var(--danger-bg, var(--err-bg, var(--accent-soft)))" }}>
+                <span style={{ color: "var(--danger)", marginTop: 1, flexShrink: 0 }}><Icon.alert size={18} /></span>
+                <div className="col gap1">
+                  <span className="t-sm" style={{ fontWeight: 700, color: "var(--danger)" }}>Scan engine error</span>
+                  <span className="t-sm">{job.error || "The scan engine reported an error."}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Completed — findingCount + register table, or a friendly 0-result line */}
+            {job.status === "done" && (
+              <div className="col gap3">
+                <div className="row gap2 t-sm" style={{ alignItems: "center" }}>
+                  <span className="center" style={{ width: 24, height: 24, borderRadius: 7, background: "var(--ok-bg)", color: "var(--ok)", flexShrink: 0 }}><Icon.check size={14} strokeWidth={2.5} /></span>
+                  <span style={{ fontWeight: 600 }}>
+                    {job.findingCount > 0
+                      ? job.findingCount + (job.findingCount === 1 ? " finding" : " findings")
+                      : "0 findings"}
+                  </span>
+                </div>
+                {job.findingCount > 0 ? (
+                  <div className="card" style={{ overflow: "hidden" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                      <thead>
+                        <tr className="t-xs faint">
+                          <th style={{ textAlign: "left", padding: "8px 12px" }}>Title</th>
+                          <th style={{ textAlign: "left", padding: "8px 12px", width: 120 }}>Severity</th>
+                          <th style={{ textAlign: "left", padding: "8px 12px", width: 160 }}>Asset</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reg.map((f, i) => (
+                          <tr key={f.dedup_key || i} style={{ borderTop: "1px solid var(--border)" }}>
+                            <td className="t-sm" style={{ padding: "8px 12px" }}>{f.title}</td>
+                            <td style={{ padding: "8px 12px" }}><window.SeverityBadge sev={f.severity_normalized} variant="compact" /></td>
+                            <td className="t-sm mono faint" style={{ padding: "8px 12px" }}>{f.asset_id}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <span className="t-sm faint">0 findings — no open services detected on {job.target}.</span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   function Field({ label, hint, children, num }) {
     return (
@@ -171,6 +401,9 @@
               </Field>
             </div>
           )}
+
+          {/* Live scan (real nmap) — start + poll a real engine run, separate flow */}
+          <LiveScanPanel assets={ASSETS} user={user} />
         </div>
 
         {/* Error banner — server scope-gate refusal (403) or validation/other failure */}
