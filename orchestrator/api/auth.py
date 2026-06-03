@@ -32,7 +32,7 @@ import time
 from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import Any, Callable, Optional
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
@@ -508,10 +508,23 @@ def _pkce_pair() -> tuple[str, str]:
 
 def _safe_next(next_param: Optional[str]) -> str:
     """Only allow same-origin relative paths as the post-login redirect target;
-    fall back to the console origin otherwise (open-redirect guard)."""
-    if next_param and next_param.startswith("/") and not next_param.startswith("//"):
-        return next_param
-    return _console_origin()
+    fall back to the console origin otherwise (open-redirect guard).
+
+    Must be a path starting with a single '/'. We reject:
+      * absolute / protocol-relative URLs ('//host', 'http://...');
+      * backslashes — a browser normalizes '\\' to '/', so '/\\evil.com' would
+        resolve to '//evil.com' (off-origin); and
+      * anything that parses to a non-empty network location.
+    """
+    if not next_param or not next_param.startswith("/") or next_param.startswith("//"):
+        return _console_origin()
+    if "\\" in next_param or "\t" in next_param or "\n" in next_param or "\r" in next_param:
+        return _console_origin()
+    # Defence in depth: after normalization it must have no scheme/host.
+    parsed = urlsplit(next_param)
+    if parsed.scheme or parsed.netloc:
+        return _console_origin()
+    return next_param
 
 
 def _set_cookie(resp: Response, name: str, value: str, max_age: int) -> None:

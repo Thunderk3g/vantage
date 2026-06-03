@@ -344,6 +344,20 @@ def test_session_actor():
     print("  [ok] session_actor renders 'Name <email>'")
 
 
+def test_safe_next_open_redirect_guard():
+    """_safe_next must only allow same-origin relative paths; off-origin targets
+    (incl. the backslash-normalization bypass) fall back to the console origin."""
+    origin = auth._console_origin()
+    # allowed: plain relative paths
+    assert auth._safe_next("/findings") == "/findings"
+    assert auth._safe_next("/sla?tab=overdue") == "/sla?tab=overdue"
+    # blocked: absolute, protocol-relative, backslash bypass, CR/LF, empty/None
+    for bad in ("//evil.com", "/\\evil.com", "/\\/evil.com", "http://evil.com",
+                "https://evil.com", "\\\\evil.com", "/\tevil", "/a\nb", "", None):
+        assert auth._safe_next(bad) == origin, f"_safe_next allowed {bad!r}"
+    print("  [ok] _safe_next blocks open-redirect (incl. '/\\' backslash bypass)")
+
+
 # ---------------------------------------------------------------------------
 # 8. LDAP filter-injection guard (security review)
 # ---------------------------------------------------------------------------
@@ -397,6 +411,7 @@ def main():
         test_dev_and_prod_cookieless,
         test_session_actor,
         test_ldap_injection_guard,
+        test_safe_next_open_redirect_guard,
     ]
     print("Running Vantage auth core self-test...\n")
     for t in tests:
