@@ -26,7 +26,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from . import seed
 from .auth import Role, User, get_current_user, require_role, session_actor, router as auth_router
-from orchestrator.reporting.export import build_xlsx, build_docx, build_pdf
+from orchestrator.reporting.export import build_xlsx, build_docx, build_pdf, build_tex
 from orchestrator import escalation, notifications, scheduler, diff, pipeline
 
 app = FastAPI(title="Vantage API", version="0", description="Read-only vulnerability-scanner console API.")
@@ -573,13 +573,14 @@ def run_escalations(user: User = Depends(require_role(Role.ADMIN))):
 # file back as a download. The PDF is AES-256 encrypted with a dual password.
 # ---------------------------------------------------------------------------
 
-ALLOWED_FORMATS = {"xlsx", "docx", "pdf"}
+ALLOWED_FORMATS = {"xlsx", "docx", "pdf", "tex"}
 
 # Media types per requested format, used on download.
 _REPORT_MEDIA = {
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "pdf": "application/pdf",
+    "tex": "application/x-tex",
 }
 
 # In-memory report registry: {reportId: {"owner", "paths": {fmt: path}, "created"}}.
@@ -659,7 +660,7 @@ def create_report(
     files: dict[str, str] = {}
     paths: dict[str, str] = {}
     # Generate ONLY the requested formats (dedup, preserve canonical order).
-    for fmt in ("xlsx", "docx", "pdf"):
+    for fmt in ("xlsx", "docx", "pdf", "tex"):
         if fmt not in fmt_list:
             continue
         path = os.path.join(outdir, f"vantage-{report_id}.{fmt}")
@@ -667,6 +668,8 @@ def create_report(
             build_xlsx(items, path, meta=meta)
         elif fmt == "docx":
             build_docx(items, path, meta=meta)
+        elif fmt == "tex":
+            build_tex(items, path, meta=meta)
         else:  # pdf
             build_pdf(items, path, str(open_password), str(owner_password), meta=meta)
         paths[fmt] = path

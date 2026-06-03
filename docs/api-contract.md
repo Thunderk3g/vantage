@@ -241,7 +241,8 @@ passes the human/scope gate.
 ### `POST /api/reports` — generate a report
 Body: `{ "template": "audit|exec|asset|sla", "scope": "all|<assetId>", "formats": ["xlsx","docx","pdf"], "openPassword"?: "<str>", "ownerPassword"?: "<str>", "by": "<name>" }`
 - `by` required (human actor) → 422.
-- `formats` ⊆ `{xlsx,docx,pdf}`, non-empty → 422.
+- `formats` ⊆ `{xlsx,docx,pdf,tex}`, non-empty → 422. (`tex` = a compilable
+  LaTeX source report; no password needed — only `pdf` requires the passwords.)
 - **If `pdf` ∈ formats:** `openPassword` and `ownerPassword` are required and must
   **differ** (422) — the open password unlocks viewing; the owner password lifts
   the copy/modify/print restriction. (The dual-password PDF is the whole point.)

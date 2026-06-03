@@ -13,6 +13,7 @@
     { id: "pdf", name: "PDF", desc: "Final, distribution-ready", icon: Icon.file, protect: true },
     { id: "xlsx", name: "Excel", desc: "Findings register (.xlsx)", icon: Icon.grid },
     { id: "docx", name: "Word", desc: "Editable report (.docx)", icon: Icon.detail },
+    { id: "tex", name: "LaTeX", desc: "Compilable source (.tex)", icon: Icon.detail },
   ];
 
   function Reports({ go, user }) {

@@ -221,6 +221,81 @@ def build_docx(findings: list, path: str, meta: Optional[dict] = None) -> str:
 
 
 # ---------------------------------------------------------------------------
+# LaTeX (.tex) — a compilable source report
+# ---------------------------------------------------------------------------
+# Finding data (titles, asset names, owners) is untrusted-ish text that can
+# contain LaTeX-special characters, so EVERY cell is escaped before it reaches
+# the document. Order matters: backslash is handled per-character (its
+# replacement is emitted verbatim, never re-escaped).
+_TEX_SPECIAL = {
+    "\\": r"\textbackslash{}", "&": r"\&", "%": r"\%", "$": r"\$",
+    "#": r"\#", "_": r"\_", "{": r"\{", "}": r"\}",
+    "~": r"\textasciitilde{}", "^": r"\textasciicircum{}",
+}
+
+
+def _tex(value) -> str:
+    """Escape a value for safe inclusion in LaTeX text."""
+    return "".join(_TEX_SPECIAL.get(ch, ch) for ch in str(value))
+
+
+def build_tex(findings: list, path: str, meta: Optional[dict] = None) -> str:
+    """Write a compilable LaTeX (.tex) findings report to ``path``.
+
+    Self-contained article (geometry + longtable + booktabs); compiles with
+    pdflatex. Same register + severity summary as the other formats, with every
+    data cell LaTeX-escaped.
+    """
+    counts = _severity_counts(findings)
+    title = _tex(_title(meta))
+
+    lines: list[str] = []
+    ap = lines.append
+    ap(r"\documentclass[10pt,a4paper]{article}")
+    ap(r"\usepackage[T1]{fontenc}")
+    ap(r"\usepackage[utf8]{inputenc}")
+    ap(r"\usepackage[margin=1.8cm,landscape]{geometry}")
+    ap(r"\usepackage{longtable}")
+    ap(r"\usepackage{booktabs}")
+    ap(r"\usepackage{array}")
+    ap(r"\usepackage{xcolor}")
+    ap(r"\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}")
+    ap(r"\title{" + title + r"}")
+    ap(r"\date{" + _tex(_now_iso()) + r"}")
+    ap(r"\begin{document}")
+    ap(r"\maketitle")
+    if meta and meta.get("scan_id"):
+        ap(r"\noindent\textbf{Scan:} " + _tex(meta["scan_id"]) + r"\\[4pt]")
+    # Summary
+    total = sum(counts.values())
+    ap(r"\noindent\textbf{Total findings:} " + str(total)
+       + r" \quad \textbf{Overdue (SLA breached):} " + str(_overdue_count(findings)) + r"\\[2pt]")
+    sev_summary = ", ".join(
+        f"{sev.capitalize()}: {counts.get(sev, 0)}" for sev in SEVERITY_ORDER
+    )
+    ap(r"\noindent\textbf{By severity:} " + _tex(sev_summary) + r"\par\vspace{8pt}")
+    # Register table
+    ap(r"{\scriptsize")
+    ap(r"\begin{longtable}{l l l L{4.2cm} L{4.2cm} r l r L{2.6cm}}")
+    ap(r"\toprule")
+    ap(" & ".join(r"\textbf{" + _tex(h) + r"}" for h in _REGISTER_HEADERS) + r" \\")
+    ap(r"\midrule")
+    ap(r"\endhead")
+    for f in findings:
+        cells = [_tex(v) for v in _register_row(f)]
+        ap(" & ".join(cells) + r" \\")
+    ap(r"\bottomrule")
+    ap(r"\end{longtable}")
+    ap(r"}")
+    ap(r"\end{document}")
+
+    text = "\n".join(lines) + "\n"
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    return path
+
+
+# ---------------------------------------------------------------------------
 # PDF — reportlab content, pikepdf dual-password encryption
 # ---------------------------------------------------------------------------
 def _render_pdf_bytes(findings: list, meta: Optional[dict]) -> bytes:

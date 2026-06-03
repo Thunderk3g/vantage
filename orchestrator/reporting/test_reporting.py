@@ -23,8 +23,8 @@ from docx import Document
 import pikepdf
 
 from reporting.export import (
-    build_xlsx, build_docx, build_pdf, build_reports,
-    _REGISTER_HEADERS,
+    build_xlsx, build_docx, build_pdf, build_tex, build_reports,
+    _REGISTER_HEADERS, _tex,
 )
 
 
@@ -149,6 +149,32 @@ def test_pdf(path: str) -> None:
     print("  [ok] pdf: no-pw -> PasswordError; open-pw works; copy/modify/print disabled (AES-256/R6)")
 
 
+def test_tex(path: str) -> None:
+    # 1. The escaper handles every LaTeX special character.
+    assert _tex(r"a & b % c _ d # e { f } $ g ~ h ^ i \ j") == (
+        r"a \& b \% c \_ d \# e \{ f \} \$ g \textasciitilde{} h "
+        r"\textasciicircum{} i \textbackslash{} j"
+    )
+
+    # 2. A finding whose register cells carry special chars must be escaped.
+    findings = FINDINGS + [{
+        "id": "VLN-X1", "title": "t", "severity": "high", "status": "open",
+        "asset": "R&D _lab_ #1 100% {svc}", "framework": "OWASP Web",
+        "catCode": "A03:2021", "cvss": 7.0, "deadline": "2026-06-10",
+        "daysLeft": 5, "isClosed": False, "owner": "a_b",
+    }]
+    build_tex(findings, path, meta=META)
+    _nonempty(path)
+
+    text = open(path, encoding="utf-8").read()
+    for marker in (r"\documentclass", r"\begin{document}", r"\end{document}",
+                   r"\begin{longtable}", r"\end{longtable}", r"\textbf{ID}"):
+        assert marker in text, f"missing LaTeX marker: {marker}"
+    assert r"R\&D \_lab\_ \#1 100\% \{svc\}" in text, "asset cell not escaped"
+    assert "R&D _lab_" not in text, "raw special chars leaked into the .tex"
+    print("  [ok] tex: compilable doc (longtable); all special chars LaTeX-escaped")
+
+
 def test_bundle(outdir: str) -> None:
     bundle = build_reports(FINDINGS, outdir, OPEN_PW, OWNER_PW, meta=META)
     assert set(bundle) == {"xlsx", "docx", "pdf"}, bundle
@@ -170,6 +196,7 @@ def main() -> int:
         test_xlsx(os.path.join(td, "f.xlsx"))
         test_docx(os.path.join(td, "f.docx"))
         test_pdf(os.path.join(td, "f.pdf"))
+        test_tex(os.path.join(td, "f.tex"))
         test_bundle(os.path.join(td, "bundle"))
     # temp dir (and all files) cleaned up on context exit.
     print("ALL REPORTING TESTS PASSED")
