@@ -65,8 +65,12 @@ Keep it honest: check a box only when the exit criteria are met and verified.
 ## Packaging & deployment
 - [x] Dockerized stack: `docker compose up` → web (nginx) + api (uvicorn) + db
       (Postgres 16, schema auto-applied). CI builds + smoke-tests the images.
-- [ ] Production hardening: non-root images, pinned digests, secrets via vault,
-      reverse proxy / TLS, healthchecks on api + web.
+- [~] Production hardening — **done:** both images run **non-root** (api uid 10001;
+      web on `nginx-unprivileged` uid 101, listening on 8080), bases **pinned by
+      digest**, and **HEALTHCHECK**s on api + web with health-gated `depends_on`
+      (verified: full `docker compose up` boots db→api(healthy)→web, /api/health
+      200, console 200, both non-root). **Remaining:** secrets via vault + reverse
+      proxy / TLS termination.
 - [x] **Claude Code plugin** (`plugin/`) — all four surfaces:
       - **MCP server** wrapping the API (16 tools; `request_scan` forwards to the
         fail-closed scope gate; no exploit tool). Smoke-tested in CI.

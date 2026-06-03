@@ -53,16 +53,32 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # Liveness from the image HEALTHCHECK (Python urllib -> /api/health); declared
+    # here too so `condition: service_healthy` gates the web container.
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8138/api/health',timeout=4).status==200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
     restart: unless-stopped
 
   web:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    # The hardened console image runs nginx UNPRIVILEGED (uid 101) and listens on
+    # 8080 inside the container; publish it on the host's 8137.
     ports:
-      - "8137:80"
+      - "8137:8080"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 
 volumes:
