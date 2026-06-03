@@ -1,0 +1,3 @@
+# Vantage MCP server runtime deps
+mcp>=1.2            # Model Context Protocol SDK (FastMCP)
+httpx>=0.27         # HTTP client for the Vantage REST API

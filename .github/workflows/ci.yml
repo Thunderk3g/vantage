@@ -166,6 +166,26 @@ jobs:
           python orchestrator/api/test_store_pg.py
 
   # ------------------------------------------------------------------
+  # Plugin: the Vantage MCP server must register its tools and pass its
+  # smoke test (scope-gate passthrough), and the manifest must be valid.
+  # ------------------------------------------------------------------
+  plugin:
+    name: MCP plugin smoke-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate plugin manifest
+        run: python -c "import json; json.load(open('plugin/.claude-plugin/plugin.json')); print('plugin.json valid')"
+      - name: MCP server smoke test (tools registered; scope-gate passthrough)
+        run: |
+          pip install -r plugin/mcp/requirements.txt
+          python -m py_compile plugin/mcp/vantage_server.py
+          python plugin/mcp/test_server_smoke.py
+
+  # ------------------------------------------------------------------
   # Docs: the architecture generator must run and produce a valid docx.
   # ------------------------------------------------------------------
   docs:

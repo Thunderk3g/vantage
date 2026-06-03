@@ -67,6 +67,12 @@ Keep it honest: check a box only when the exit criteria are met and verified.
       (Postgres 16, schema auto-applied). CI builds + smoke-tests the images.
 - [ ] Production hardening: non-root images, pinned digests, secrets via vault,
       reverse proxy / TLS, healthchecks on api + web.
+- [x] **Claude Code plugin** (`plugin/`): an MCP server wrapping the API so Claude
+      can drive the console (read/triage/scope-check/scan-diff/report). The
+      scan-and-report boundary stays server-side — `request_scan` forwards to the
+      fail-closed scope gate; no exploit tool exists. Smoke-tested in CI.
+      **Next plugin surfaces:** a PreToolUse scope-guard hook, `/vantage-*` slash
+      commands, and the triage/SLA playbook as a skill.
 
 ## UI — Vulnerability Console (`frontend/`)  `spans phases 1–4`
 **Exit:** each screen is wired to the API and replaces its mock data source.

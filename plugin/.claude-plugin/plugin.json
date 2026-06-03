@@ -1,0 +1,20 @@
+{
+  "name": "vantage",
+  "version": "0.1.0",
+  "description": "Vantage — AI-augmented vulnerability console (scan-and-report ONLY). MCP tools to read the finding register, check an asset against the approved-scope inventory, request authorized scans (server-side scope gate, fail-closed), diff scans / verify closure, drive the human-gated triage + exception + escalation workflows, and generate dual-password reports. No tool exploits, attacks, or acts on a target.",
+  "author": {
+    "name": "Vantage (Bajaj Life InfoSec reference build)"
+  },
+  "homepage": "https://github.com/Thunderk3g/vantage",
+  "license": "MIT",
+  "keywords": ["security", "vulnerability-management", "appsec", "triage", "mcp"],
+  "mcpServers": {
+    "vantage": {
+      "command": "python",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/vantage_server.py"],
+      "env": {
+        "VANTAGE_API_BASE": "http://localhost:8138"
+      }
+    }
+  }
+}
