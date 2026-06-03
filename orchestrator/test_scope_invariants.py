@@ -67,14 +67,20 @@ FORBIDDEN = (
 # attribute. Kept intentionally TIGHT.
 ALLOWED_ADAPTER_VERBS = {"preflight", "launch", "wait", "fetch_raw", "parse", "name"}
 
-# The four concrete adapter source files (for text-level inspection).
+# Every concrete adapter source file (for text-level inspection) — licensed set
+# plus the OSS variant (zap/nuclei/trivy).
 ADAPTER_FILES = {
     "nmap": os.path.join(HERE, "adapters", "nmap_adapter.py"),
     "nessus": os.path.join(HERE, "adapters", "nessus_adapter.py"),
     "burp": os.path.join(HERE, "adapters", "burp_adapter.py"),
     "nikto": os.path.join(HERE, "adapters", "nikto_adapter.py"),
+    "zap": os.path.join(HERE, "adapters", "zap_adapter.py"),
+    "nuclei": os.path.join(HERE, "adapters", "nuclei_adapter.py"),
+    "trivy": os.path.join(HERE, "adapters", "trivy_adapter.py"),
 }
 # Adapters whose native format is XML and which therefore MUST use defusedxml.
+# (zap/nuclei/trivy parse JSON/JSONL, so they're not in this set — but the
+# no-stdlib-xml.etree check below still applies to every ADAPTER_FILES entry.)
 XML_ADAPTERS = ("nmap", "nessus", "nikto")
 
 ACTIVITIES_FILE = os.path.join(HERE, "activities.py")
@@ -133,8 +139,12 @@ def test_adapters_expose_no_offensive_method():
     from adapters.nessus_adapter import NessusAdapter
     from adapters.burp_adapter import BurpAdapter
     from adapters.nikto_adapter import NiktoAdapter
+    from adapters.zap_adapter import ZapAdapter
+    from adapters.nuclei_adapter import NucleiAdapter
+    from adapters.trivy_adapter import TrivyAdapter
 
-    for cls in (NmapAdapter, NessusAdapter, BurpAdapter, NiktoAdapter):
+    for cls in (NmapAdapter, NessusAdapter, BurpAdapter, NiktoAdapter,
+                ZapAdapter, NucleiAdapter, TrivyAdapter):
         # Public surface = names not starting with '_'.
         public = [n for n in dir(cls) if not n.startswith("_")]
 

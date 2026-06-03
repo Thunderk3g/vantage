@@ -146,7 +146,11 @@ Keep it honest: check a box only when the exit criteria are met and verified.
 ## Phase 5 — OSS variant & hardening  `target: 2–3 wks`
 **Exit:** license-free pipeline at parity; audit-ready.
 
-- [ ] ZAP / Nuclei / Trivy adapters at parity
+- [x] ZAP / Nuclei / Trivy adapters at parity — `parse()` for each (ZAP JSON
+      riskcode→band; Nuclei JSONL incl. critical + CVE/CVSS; Trivy JSON vulns +
+      misconfigs) unit-tested against real-shaped fixtures, and wired into
+      `pipeline.run_oss_pipeline()` (same normalize→triage path; e2e parity test).
+      The OSS set is a config swap, not a code change.
 - [ ] Pen-test of Vantage itself
 - [ ] ISO 27001:2022 evidence pack
 - [ ] DR / backup; role attestation

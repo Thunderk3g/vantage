@@ -44,16 +44,30 @@ from adapters.nmap_adapter import NmapAdapter  # noqa: E402
 from adapters.nessus_adapter import NessusAdapter  # noqa: E402
 from adapters.burp_adapter import BurpAdapter  # noqa: E402
 from adapters.nikto_adapter import NiktoAdapter  # noqa: E402
+from adapters.zap_adapter import ZapAdapter  # noqa: E402
+from adapters.nuclei_adapter import NucleiAdapter  # noqa: E402
+from adapters.trivy_adapter import TrivyAdapter  # noqa: E402
 
 _FIXTURE_DIR = os.path.join(_ORCH_DIR, "adapters", "fixtures")
 
-# (tool key, adapter instance, fixture filename, native_format). The tool key
-# matches each adapter's ``.name`` so ``raw_by_tool`` is keyed consistently.
+# (adapter instance, fixture filename, native_format). The tool key matches each
+# adapter's ``.name`` so ``raw_by_tool`` is keyed consistently.
+#
+# Two interchangeable engine sets (the OSS variant is a config swap, not a code
+# change — both feed the SAME normalize->triage path):
+#   * LICENSED: Nessus Pro / Burp Pro / Nmap / Nikto
+#   * OSS:      ZAP / Nuclei / Trivy (license-free, at parity)
 _REFERENCE_SOURCES = (
     (NmapAdapter(), "nmap_sample.xml", "nmap-xml"),
     (NessusAdapter(policy="VA"), "nessus_sample.nessus", "nessus-xml"),
     (BurpAdapter(mode="scan"), "burp_sample.json", "burp-json"),
     (NiktoAdapter(), "nikto_sample.xml", "nikto-xml"),
+)
+
+_OSS_SOURCES = (
+    (ZapAdapter(), "zap_sample.json", "zap-json"),
+    (NucleiAdapter(), "nuclei_sample.jsonl", "nuclei-jsonl"),
+    (TrivyAdapter(), "trivy_sample.json", "trivy-json"),
 )
 
 
@@ -62,12 +76,12 @@ def _fixture_path(name: str) -> str:
     return os.path.join(_FIXTURE_DIR, name)
 
 
-def load_fixture_findings() -> dict[str, list]:
-    """Run each adapter's parse() over its committed sample fixture and
-    return {tool_name: [CanonicalFinding, ...]} for nmap, nessus, burp, nikto.
-    Reference/demo source — real scans persist raw artifacts (future slice)."""
+def _load_sources(sources) -> dict[str, list]:
+    """Run each (adapter, fixture, format) source's parse() over its committed
+    fixture → {tool_name: [CanonicalFinding, ...]}. Reference/demo source —
+    real scans persist raw artifacts (future slice)."""
     raw_by_tool: dict[str, list] = {}
-    for adapter, fixture_name, native_format in _REFERENCE_SOURCES:
+    for adapter, fixture_name, native_format in sources:
         raw = RawArtifact(
             scan_id="DEMO",
             source_tool=adapter.name,
@@ -76,6 +90,17 @@ def load_fixture_findings() -> dict[str, list]:
         )
         raw_by_tool[adapter.name] = adapter.parse(raw)
     return raw_by_tool
+
+
+def load_fixture_findings() -> dict[str, list]:
+    """Licensed engine set (nmap, nessus, burp, nikto) parsed from fixtures."""
+    return _load_sources(_REFERENCE_SOURCES)
+
+
+def load_oss_fixture_findings() -> dict[str, list]:
+    """OSS engine set (zap, nuclei, trivy) parsed from fixtures — the
+    license-free variant, feeding the same normalize->triage path at parity."""
+    return _load_sources(_OSS_SOURCES)
 
 
 def _stamp_detected_at(raw_by_tool: dict[str, list], when: str) -> dict[str, list]:
@@ -101,14 +126,22 @@ def _stamp_detected_at(raw_by_tool: dict[str, list], when: str) -> dict[str, lis
     return stamped
 
 
-def run_reference_pipeline(today=None) -> list[dict]:
-    """Fixtures -> adapters.parse() -> normalization.normalize_and_triage ->
-    the triaged canonical register (list of dicts). Deterministic."""
-    raw_by_tool = load_fixture_findings()
+def _run(raw_by_tool: dict[str, list], today=None) -> list[dict]:
     # Anchor detection to the scan date so the demo findings get SLA deadlines.
     when = (today or date.today()).isoformat()
     raw_by_tool = _stamp_detected_at(raw_by_tool, when)
     return normalization.normalize_and_triage(raw_by_tool, today=today)
+
+
+def run_reference_pipeline(today=None) -> list[dict]:
+    """Licensed fixtures -> adapters.parse() -> normalize -> triage register."""
+    return _run(load_fixture_findings(), today=today)
+
+
+def run_oss_pipeline(today=None) -> list[dict]:
+    """OSS (zap/nuclei/trivy) fixtures through the SAME normalize->triage path —
+    demonstrates the license-free variant at parity with the licensed set."""
+    return _run(load_oss_fixture_findings(), today=today)
 
 
 if __name__ == "__main__":  # pragma: no cover - manual smoke run

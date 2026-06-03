@@ -1,0 +1,99 @@
+{
+  "@programName": "ZAP",
+  "@version": "2.14.0",
+  "@generated": "Wed, 03 Jun 2026 10:15:42",
+  "site": [
+    {
+      "@name": "https://app.internal",
+      "@host": "app.internal",
+      "@port": "443",
+      "@ssl": "true",
+      "alerts": [
+        {
+          "pluginid": "40012",
+          "alertRef": "40012-1",
+          "name": "Cross Site Scripting (Reflected)",
+          "riskcode": "3",
+          "confidence": "2",
+          "riskdesc": "High (Medium)",
+          "desc": "<p>Cross-site Scripting (XSS) is an attack technique that involves echoing attacker-supplied code into a user's browser instance.</p>",
+          "solution": "<p>Validate all input and encode output. Use a context-aware output encoding library.</p>",
+          "cweid": "79",
+          "wascid": "8",
+          "sourceid": "12",
+          "instances": [
+            {
+              "uri": "https://app.internal/search?q=test",
+              "method": "GET",
+              "param": "q",
+              "attack": "<script>",
+              "evidence": "<script>"
+            }
+          ]
+        },
+        {
+          "pluginid": "10202",
+          "alertRef": "10202",
+          "name": "Absence of Anti-CSRF Tokens",
+          "riskcode": "2",
+          "confidence": "2",
+          "riskdesc": "Medium (Medium)",
+          "desc": "<p>No Anti-CSRF tokens were found in a HTML submission form.</p>",
+          "solution": "<p>Use a vetted library or framework that does not allow this weakness to occur or provides constructs that make it easier to avoid.</p>",
+          "cweid": "352",
+          "wascid": "9",
+          "sourceid": "7",
+          "instances": [
+            {
+              "uri": "https://app.internal/account/profile",
+              "method": "POST",
+              "param": "",
+              "evidence": "<form action=\"/account/profile\" method=\"POST\">"
+            },
+            {
+              "uri": "https://app.internal/account/settings",
+              "method": "POST",
+              "param": "",
+              "evidence": "<form action=\"/account/settings\" method=\"POST\">"
+            }
+          ]
+        },
+        {
+          "pluginid": "10010",
+          "alertRef": "10010",
+          "name": "Cookie No HttpOnly Flag",
+          "riskcode": "1",
+          "confidence": "2",
+          "riskdesc": "Low (Medium)",
+          "desc": "<p>A cookie has been set without the HttpOnly flag, which means that the cookie can be accessed by JavaScript.</p>",
+          "solution": "<p>Ensure that the HttpOnly flag is set for all cookies.</p>",
+          "cweid": "1004",
+          "wascid": "13",
+          "sourceid": "3",
+          "instances": [
+            {
+              "uri": "https://app.internal/login",
+              "method": "GET",
+              "param": "session_id",
+              "evidence": "Set-Cookie: session_id"
+            }
+          ]
+        },
+        {
+          "pluginid": "10094",
+          "alertRef": "10094",
+          "name": "Information Disclosure - Sensitive Information in URL",
+          "riskcode": "0",
+          "confidence": "1",
+          "riskdesc": "Informational (Low)",
+          "desc": "<p>The request appeared to contain sensitive information leaked in the URL. This can violate PCI and most organizational compliance policies.</p>",
+          "solution": "<p>Do not pass sensitive information in URIs.</p>",
+          "cweid": "200",
+          "wascid": "13",
+          "sourceid": "1",
+          "instances": []
+        }
+      ]
+    }
+  ]
+}

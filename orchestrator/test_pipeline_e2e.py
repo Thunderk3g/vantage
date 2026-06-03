@@ -109,6 +109,21 @@ def test_cross_tool_dedup_same_cve():
     print("  [ok] cross-tool same-CVE (nessus + nuclei) collapses to 1 canonical")
 
 
+def test_oss_pipeline_at_parity():
+    """The OSS engine set (zap/nuclei/trivy) flows through the SAME
+    normalize->triage path and yields a coherent triaged register."""
+    raw = pipeline.load_oss_fixture_findings()
+    for tool in ("zap", "nuclei", "trivy"):
+        assert tool in raw and len(raw[tool]) >= 1, f"{tool} produced no findings"
+    register = pipeline.run_oss_pipeline(today=TODAY)
+    assert register, "OSS pipeline produced an empty register"
+    bands = {f["severity_normalized"] for f in register}
+    assert bands <= _BANDS, f"non-canonical OSS band(s): {bands - _BANDS}"
+    # Trivy CRITICAL CVE and Nuclei critical survive (not collapsed to info).
+    assert "critical" in bands, f"expected a 'critical' OSS band, got {bands}"
+    print("  [ok] OSS set (zap/nuclei/trivy) at parity: same triage path, critical survives")
+
+
 def main():
     tests = [
         test_load_fixture_findings_all_tools,
@@ -116,6 +131,7 @@ def main():
         test_sla_stamping,
         test_taxonomy_populated_for_web,
         test_cross_tool_dedup_same_cve,
+        test_oss_pipeline_at_parity,
     ]
     print("Running reference pipeline end-to-end self-test...\n")
     for t in tests:

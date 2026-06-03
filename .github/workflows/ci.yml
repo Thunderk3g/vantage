@@ -30,6 +30,7 @@ jobs:
             shared.py workflows.py activities.py worker.py \
             adapters/base.py adapters/nmap_adapter.py adapters/nessus_adapter.py \
             adapters/burp_adapter.py adapters/nikto_adapter.py \
+            adapters/zap_adapter.py adapters/nuclei_adapter.py adapters/trivy_adapter.py \
             api/__init__.py api/seed.py api/main.py api/db.py api/auth.py api/store.py \
             triage/__init__.py triage/maps.py triage/engine.py \
             reporting/__init__.py reporting/export.py \
@@ -44,6 +45,9 @@ jobs:
           python adapters/test_nessus_adapter.py
           python adapters/test_burp_adapter.py
           python adapters/test_nikto_adapter.py
+          python adapters/test_zap_adapter.py
+          python adapters/test_nuclei_adapter.py
+          python adapters/test_trivy_adapter.py
       - name: Triage engine unit test (stdlib only)
         run: python orchestrator/triage/test_triage.py
       - name: Normalization + triage wiring test (stdlib only)
