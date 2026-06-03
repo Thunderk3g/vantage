@@ -34,7 +34,7 @@ jobs:
             api/__init__.py api/seed.py api/main.py api/db.py api/auth.py api/store.py \
             triage/__init__.py triage/maps.py triage/engine.py \
             reporting/__init__.py reporting/export.py \
-            normalization.py pipeline.py escalation.py notifications.py scheduler.py diff.py
+            normalization.py pipeline.py escalation.py notifications.py scheduler.py diff.py run_scan.py
       - name: Scope-boundary invariants (the scan-and-report guarantee, as a test)
         working-directory: orchestrator
         run: python test_scope_invariants.py
@@ -48,6 +48,7 @@ jobs:
           python adapters/test_zap_adapter.py
           python adapters/test_nuclei_adapter.py
           python adapters/test_trivy_adapter.py
+          python adapters/test_nmap_live.py
       - name: Triage engine unit test (stdlib only)
         run: python orchestrator/triage/test_triage.py
       - name: Normalization + triage wiring test (stdlib only)
@@ -67,6 +68,9 @@ jobs:
       - name: Scan-diff / closure-verification engine (stdlib only)
         working-directory: orchestrator
         run: python test_diff.py
+      - name: Live scan-runner (scope-gated; FakeAdapter, no nmap needed)
+        working-directory: orchestrator
+        run: python test_run_scan.py
       - name: End-to-end pipeline test (fixtures -> adapters -> normalize -> triage)
         working-directory: orchestrator
         run: python test_pipeline_e2e.py

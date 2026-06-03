@@ -8,13 +8,41 @@ scan, service & version enumeration). No script-based exploitation:
 
 Parsing: nmap -oX XML -> defusedxml -> CanonicalFinding (one per
 open service; severity Info — these are inventory facts, not vulns).
+
+Live-engine safety notes (launch/wait/fetch_raw):
+  * Non-intrusive by construction: TCP connect scan (-sT, unprivileged —
+    never -sS/-O/--privileged), service/version detection (-sV), and ONLY
+    safe NSE categories (default/discovery/version/safe). Forbidden NSE
+    (exploit/intrusive/dos/brute/malware) is rejected by
+    `_assert_safe_scripts` before any process starts.
+  * argv-based, NEVER a shell: subprocess.Popen is called with an argument
+    LIST and no shell=True. Targets are passed as separate argv items and
+    are validated (non-empty, must not start with '-') to prevent option/
+    argument injection.
+  * Scope is enforced by the CALLER: the orchestrator restricts `targets`
+    to the token allowlist and `preflight(token)` re-verifies scope via
+    `assert_targets_in_scope`. This adapter only ever scans what it is given.
 """
 from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import tempfile
+import uuid
 
 import defusedxml.ElementTree as ET
 
 from shared import AuthToken, RawArtifact, CanonicalFinding, Severity
 from .base import assert_targets_in_scope
+
+# Module-level registry of running/finished jobs, keyed by opaque handle id.
+# value: {"proc", "out_path", "targets", "scan_id", "returncode"}
+_JOBS: dict[str, dict] = {}
+
+# Bounded waits so a hung engine can never block the activity indefinitely.
+_HOST_TIMEOUT = "120s"      # per-host nmap cap (passed to nmap)
+_WAIT_TIMEOUT_S = 300       # our communicate() cap on the whole run
 
 # Only safe, non-intrusive NSE categories are ever permitted.
 _ALLOWED_NSE = {"default", "discovery", "version", "safe"}
@@ -28,11 +56,54 @@ class NmapAdapter:
         assert_targets_in_scope(token.target_addrs, token)
 
     def launch(self, targets: list[str], mode: str = "full", **kw) -> str:
+        # 1) Safe NSE set first — reject forbidden categories before anything else.
         scripts = "default,discovery,version,safe" if mode == "full" else "discovery"
         self._assert_safe_scripts(scripts)
-        # subprocess: nmap -sV -O --script <scripts> -oX <out> <targets...>
-        # targets are exactly the allowlist; rate limits applied centrally.
-        raise NotImplementedError("wire to nmap CLI (subprocess, -oX)")
+
+        # 2) Validate targets BEFORE locating/launching anything. They are passed
+        #    as separate argv items (never a shell), but we still refuse empties
+        #    and anything that looks like an option ('-...') to block argument
+        #    injection into the nmap command line.
+        if not isinstance(targets, list) or not targets:
+            raise ValueError("nmap launch requires a non-empty list of targets")
+        for t in targets:
+            if not isinstance(t, str) or not t or t.startswith("-"):
+                raise ValueError(f"refusing unsafe nmap target: {t!r}")
+
+        # 3) Locate the binary. Clear, actionable error if missing.
+        binary = shutil.which("nmap")
+        if not binary:
+            raise RuntimeError("nmap binary not found on PATH")
+
+        # 4) Materialize the -oX output path.
+        fd, out_xml_path = tempfile.mkstemp(suffix=".xml")
+        os.close(fd)
+
+        # 5) Build argv. -sT = TCP connect (no root); -sV = version; -Pn = no
+        #    ping (treat host as up); safe NSE only; bounded per-host timeout.
+        #    Deliberately NO -sS / -O / --privileged.
+        argv = [
+            binary,
+            "-sT", "-sV", "-Pn",
+            "--script", scripts,
+            "-oX", out_xml_path,
+            "--host-timeout", _HOST_TIMEOUT,
+            *targets,
+        ]
+
+        # 6) Start the process. argv list + NO shell=True (no shell injection).
+        proc = subprocess.Popen(
+            argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        handle = uuid.uuid4().hex
+        _JOBS[handle] = {
+            "proc": proc,
+            "out_path": out_xml_path,
+            "targets": list(targets),
+            "scan_id": kw.get("scan_id", "LIVE"),
+            "returncode": None,
+        }
+        return handle
 
     def _assert_safe_scripts(self, scripts: str) -> None:
         cats = {c.strip() for c in scripts.split(",")}
@@ -40,8 +111,44 @@ class NmapAdapter:
             raise PermissionError(
                 f"Nmap NSE categories not permitted: {cats - _ALLOWED_NSE}")
 
-    def wait(self, handle: str) -> None: ...
-    def fetch_raw(self, handle: str) -> RawArtifact: ...
+    def wait(self, handle: str) -> None:
+        job = _JOBS.get(handle)
+        if job is None:
+            raise KeyError(f"unknown nmap job handle: {handle!r}")
+        proc = job["proc"]
+        try:
+            _stdout, stderr = proc.communicate(timeout=_WAIT_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate()
+            raise RuntimeError(
+                f"nmap job {handle} exceeded {_WAIT_TIMEOUT_S}s; killed")
+        job["returncode"] = proc.returncode
+
+        # nmap returns 0 on success. A non-zero exit with no usable output file
+        # is a hard error (e.g. bad args, permission, abort).
+        out_path = job["out_path"]
+        produced = os.path.exists(out_path) and os.path.getsize(out_path) > 0
+        if proc.returncode != 0 and not produced:
+            detail = (stderr or b"").decode("utf-8", "replace").strip()
+            raise RuntimeError(
+                f"nmap job {handle} failed (rc={proc.returncode}): {detail}")
+
+    def fetch_raw(self, handle: str) -> RawArtifact:
+        job = _JOBS.get(handle)
+        if job is None:
+            raise KeyError(f"unknown nmap job handle: {handle!r}")
+        out_path = job["out_path"]
+        if not (os.path.exists(out_path) and os.path.getsize(out_path) > 0):
+            raise RuntimeError(
+                f"nmap job {handle} produced no output at {out_path}")
+        # Do NOT delete the file — the caller / parse() reads it.
+        return RawArtifact(
+            scan_id=job.get("scan_id", "LIVE"),
+            source_tool=self.name,
+            uri=out_path,
+            native_format="nmap-xml",
+        )
 
     def parse(self, raw: RawArtifact) -> list[CanonicalFinding]:
         # defusedxml hardens against XXE/entity-expansion in untrusted scanner
