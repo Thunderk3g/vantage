@@ -27,7 +27,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from . import seed
 from .auth import Role, User, get_current_user, require_role, session_actor, router as auth_router
 from orchestrator.reporting.export import build_xlsx, build_docx, build_pdf
-from orchestrator import escalation, notifications, scheduler
+from orchestrator import escalation, notifications, scheduler, diff, pipeline
 
 app = FastAPI(title="Vantage API", version="0", description="Read-only vulnerability-scanner console API.")
 
@@ -443,6 +443,39 @@ def decide_exception(
 @app.get("/api/audit")
 def get_audit(limit: Optional[int] = Query(None, ge=1), user: User = Depends(get_current_user)):
     return {"audit": seed.audit(limit)}
+
+
+# ---------------------------------------------------------------------------
+# Scan diff / closure verification (v0.1) — wires the pure diff engine
+# (orchestrator/diff.py) to the two deterministic triage pipelines. The
+# "request retest" action is the explicit, human-gated mutation the console
+# button maps to: it flips a finding to status "retest" and audits it. Neither
+# endpoint launches a scan or touches a target.
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/scan-diff")
+def get_scan_diff(user: User = Depends(get_current_user)):
+    """Diff two scan registers — the licensed engine set (baseline / 'previous
+    scan') vs the OSS engine set (current / 'latest scan') — by finding
+    signature. Read-only; computes from the deterministic reference pipelines.
+    Resolved = in baseline, gone in current (closure-verified); new = only in
+    current; persisting = both; regressed = persisting + severity increased."""
+    base = pipeline.run_reference_pipeline(seed.TODAY)
+    head = pipeline.run_oss_pipeline(seed.TODAY)
+    result = diff.diff_scans(base, head)
+    return {"baseLabel": "licensed", "headLabel": "oss", "today": TODAY_ISO, **result}
+
+
+@app.post("/api/findings/{finding_id}/retest")
+def request_retest(finding_id: str, user: User = Depends(require_role(Role.ANALYST))):
+    actor = session_actor(user)
+    updated = seed.update_finding_status(finding_id, "retest", actor, TODAY_ISO)
+    if updated is None:
+        return _err(404, "not_found", f"Finding not found: {finding_id}")
+    seed.record_audit(actor=actor, action="RETEST_REQUESTED", entity_type="finding",
+                      entity_id=finding_id, summary=f"retest requested for {finding_id} by {actor}")
+    return {"finding": updated}
 
 
 # ---------------------------------------------------------------------------

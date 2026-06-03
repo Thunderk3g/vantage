@@ -67,6 +67,28 @@
         .finally(() => setSaving(false));
     }
 
+    // Request a retest. Shares the saving/saveErr/saved banner with the other
+    // status mutations. On success the server flips status to "retest".
+    function requestRetest() {
+      if (saving) return;
+      setSaving(true);
+      setSaveErr(null);
+      setSaved(false);
+      window.api.requestRetest(f.id)
+        .then(updated => {
+          setStatus(updated.status);
+          setPick(updated.status);
+          if (updated.humanValidatedBy) setValidatedBy(updated.humanValidatedBy);
+          if (updated.humanValidatedAt) setValidatedAt(new Date(updated.humanValidatedAt));
+          setSaved(true);
+        })
+        .catch(err => {
+          // Never fake success: keep the displayed status, surface the message.
+          setSaveErr(err && err.message ? err.message : "Failed to request a retest.");
+        })
+        .finally(() => setSaving(false));
+    }
+
     function saveStatus() {
       if (saving || pick === status) return; // deliberate, no-op when unchanged
       setSaving(true);
@@ -133,7 +155,8 @@ Authorization: Bearer <policyholder-A token>
                 <div className="row gap3 mt4 wrap">
                   <button className="btn sm" disabled={saving}><Icon.user size={14} /> Reassign</button>
                   <button className="btn sm" disabled={saving} onClick={() => go("exception", { finding: f.id })}><Icon.exception size={14} /> Request exception</button>
-                  <button className="btn sm" disabled={saving}><Icon.history size={14} /> Request retest</button>
+                  <button className="btn sm" disabled={saving || !allowed} onClick={requestRetest}
+                    title={allowed ? undefined : "requires the analyst role"}><Icon.history size={14} /> Request retest</button>
                   {status === "confirmed_fp" ? (
                     <button className="btn sm ghost" disabled={saving || !allowed} onClick={() => decideFalsePositive("clear")}
                       title={allowed ? undefined : "requires the analyst role"}>

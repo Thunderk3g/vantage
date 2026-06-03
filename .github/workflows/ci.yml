@@ -34,7 +34,7 @@ jobs:
             api/__init__.py api/seed.py api/main.py api/db.py api/auth.py api/store.py \
             triage/__init__.py triage/maps.py triage/engine.py \
             reporting/__init__.py reporting/export.py \
-            normalization.py pipeline.py escalation.py notifications.py scheduler.py
+            normalization.py pipeline.py escalation.py notifications.py scheduler.py diff.py
       - name: Scope-boundary invariants (the scan-and-report guarantee, as a test)
         working-directory: orchestrator
         run: python test_scope_invariants.py
@@ -64,6 +64,9 @@ jobs:
       - name: Scan scheduler engine (cadence + blackout calendar; stdlib only)
         working-directory: orchestrator
         run: python test_scheduler.py
+      - name: Scan-diff / closure-verification engine (stdlib only)
+        working-directory: orchestrator
+        run: python test_diff.py
       - name: End-to-end pipeline test (fixtures -> adapters -> normalize -> triage)
         working-directory: orchestrator
         run: python test_pipeline_e2e.py
@@ -84,6 +87,8 @@ jobs:
         run: python orchestrator/api/test_escalations_api.py
       - name: Schedule API (cadence + blackout schedule rollup)
         run: python orchestrator/api/test_schedule_api.py
+      - name: Scan-diff API + retest workflow
+        run: python orchestrator/api/test_scan_diff.py
       - name: Guard — no exploitation phase may be introduced
         run: |
           if grep -rniE "phase\s*=\s*['\"]?(exploit|post_exploit|lateral|remediate)" orchestrator db; then

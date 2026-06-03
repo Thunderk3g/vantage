@@ -135,7 +135,11 @@ Keep it honest: check a box only when the exit criteria are met and verified.
 - [x] Exception routing UI + approvals (CISO / RMC / Board) — tier-gated
       approve/reject (`POST /api/exceptions/{id}/decision`); approval is the only
       path to `risk_accepted`.
-- [ ] Retest / diff flow (closure verification vs prior scan)
+- [x] Retest / diff flow (closure verification vs prior scan) — `diff.py` (pure:
+      `diff_scans` resolved/new/persisting/regressed by signature + `verify_closure`)
+      + `GET /api/scan-diff` (licensed vs OSS register diff) + `POST /api/findings/
+      {id}/retest`. Console "Scan diff" screen + the finding's Request-retest button.
+      Resolved findings are closure-verified (absent from the latest register).
 - [~] Notification service + ITSM integration (Jira / ServiceNow) — `notifications.py`
       (Notifier + log/in-memory/webhook sinks, dedupe ledger, Jira-shaped ITSM
       payload) wired to `POST /api/escalations/run` (admin sweep). **Remaining:**

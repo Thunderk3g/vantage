@@ -16,6 +16,7 @@
     { id: "scan", label: "Start a scan", icon: Icon.scan },
     { id: "findings", label: "Findings", icon: Icon.findings, count: "open" },
     { id: "sla", label: "SLA tracker", icon: Icon.sla, count: "overdue" },
+    { id: "scandiff", label: "Scan diff", icon: Icon.history },
     { id: "schedule", label: "Schedule", icon: Icon.clock },
     { id: "exception", label: "Exceptions", icon: Icon.exception },
     { id: "reports", label: "Reports", icon: Icon.reports },
@@ -23,7 +24,7 @@
 
   const CRUMB = {
     dashboard: "Dashboard", scan: "Start a scan", findings: "Findings",
-    detail: "Findings · Detail", sla: "SLA & escalation", schedule: "Scan schedule", exception: "Exceptions",
+    detail: "Findings · Detail", sla: "SLA & escalation", scandiff: "Scan diff", schedule: "Scan schedule", exception: "Exceptions",
     reports: "Reports", system: "Design system",
   };
 
@@ -126,6 +127,7 @@
       case "findings": Screen = <window.Findings initial={params} go={go} />; break;
       case "detail": Screen = <window.FindingDetail id={params.id} go={go} user={user} />; break;
       case "sla": Screen = <window.SLATracker go={go} user={user} />; break;
+      case "scandiff": Screen = <window.ScanDiff go={go} />; break;
       case "schedule": Screen = <window.Schedule go={go} />; break;
       case "exception": Screen = <window.Exceptions initial={params} go={go} user={user} />; break;
       case "reports": Screen = <window.Reports go={go} user={user} />; break;

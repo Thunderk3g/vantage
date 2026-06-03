@@ -176,6 +176,25 @@ Body: `{ "decision": "approve" | "reject", "note"?: "<text>" }`.
 Returns `{ "audit": [ { "seq", "ts", "actor", "action", "entityType", "entityId", "summary" }, … ] }`, most-recent first. Simplified in-memory mirror of the
 hash-chained `audit_log` table.
 
+### `GET /api/scan-diff` — diff two scan registers (any authenticated user)
+Compares the **licensed** engine set (baseline / "previous scan") against the
+**OSS** engine set (current / "latest scan") by finding signature (the triage
+`dedup_key`). Read-only; computed from the deterministic reference pipelines.
+```json
+{ "baseLabel":"licensed", "headLabel":"oss", "today":"2026-06-02",
+  "resolved":[ {"title","assetId","severity","sourceTool","cve":[…],"signature"}, … ],
+  "new":[ … ], "persisting":[ … ], "regressed":[ {…,"fromSeverity":"low"}, … ],
+  "counts":{"baseline":N,"current":M,"resolved":R,"new":NW,"persisting":P,"regressed":RG} }
+```
+`resolved` = in baseline, gone in current (**closure-verified**); `new` = only in
+current; `persisting` = both; `regressed` = persisting whose severity band rose.
+
+### `POST /api/findings/{id}/retest` — request a retest (role: `analyst`)
+Sets the finding's status to `retest` (human-gated; server-derived actor),
+audited `RETEST_REQUESTED`. Returns `{ "finding": Finding }`. 404 unknown; 403 if
+not `analyst`/`admin`. Closure is then verified by a later `GET /api/scan-diff`
+(the finding appearing under `resolved` means the re-scan no longer reports it).
+
 ### `GET /api/escalations` — escalation staircase rollup (any authenticated user)
 Returns the Day 0→2→4→9→18 ladder and per-finding escalation state:
 ```json

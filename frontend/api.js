@@ -250,6 +250,30 @@
     decideException(id, body) {
       return sendJSON("/api/exceptions/" + encodeURIComponent(id) + "/decision", body, "POST");
     },
+    // ---- Scan diff -----------------------------------------------------------
+    // GET /api/scan-diff → the two-register comparison
+    // { baseLabel, headLabel, today, resolved, new, persisting, regressed, counts }.
+    // On any error, fall back to a minimal empty-shaped object so the Scan diff
+    // screen still renders offline.
+    async scanDiff() {
+      try {
+        return await getJSON("/api/scan-diff");
+      } catch (err) {
+        warnOnce("GET /api/scan-diff", err);
+        return {
+          baseLabel: "licensed", headLabel: "oss", today: "2026-06-02",
+          resolved: [], new: [], persisting: [], regressed: [],
+          counts: { baseline: 0, current: 0, resolved: 0, new: 0, persisting: 0, regressed: 0 },
+        };
+      }
+    },
+    // POST /api/findings/{id}/retest (role analyst) — request a retest. Server
+    // derives the actor; send no body. Returns the updated (hydrated) finding
+    // (status becomes "retest"). Throws on failure (incl. 403/404).
+    requestRetest(id) {
+      return sendJSON("/api/findings/" + encodeURIComponent(id) + "/retest", {}, "POST")
+        .then(function (d) { return hydrateFinding(d && d.finding); });
+    },
     // Recent audit-trail entries (read; falls back to [] offline).
     async audit(limit) {
       try {
