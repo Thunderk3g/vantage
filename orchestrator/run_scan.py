@@ -42,7 +42,9 @@ from shared import (  # noqa: E402
 from api import seed  # noqa: E402
 
 # Loopback is always authorized — scanning your own host needs no inventory entry.
-LOOPBACK = {"127.0.0.1", "localhost", "::1", "0.0.0.0"}
+# ``host.docker.internal`` is the container's name for the Docker HOST, i.e. still
+# a self-scan of your own machine when the runner is containerised.
+LOOPBACK = {"127.0.0.1", "localhost", "::1", "0.0.0.0", "host.docker.internal"}
 
 
 def authorized_targets() -> set[str]:

@@ -1,0 +1,37 @@
+# Vantage live scanner — bundles the nmap engine + the scope-gated run_scan CLI.
+#
+# Lets you run a REAL, authorized, scope-gated scan with NO host install of nmap
+# (apt runs inside this image build). Scan-and-report only: safe-NSE discovery/
+# version scans against loopback / host.docker.internal / the HOD-approved
+# inventory; any other target is refused fail-closed by run_scan.py.
+#
+# Usage (from the repo root):
+#   docker compose build scanner
+#   docker compose run --rm scanner --target 127.0.0.1            # scan the container
+#   docker compose run --rm scanner --target host.docker.internal # scan your own host
+#   docker compose run --rm scanner --target 8.8.8.8              # REFUSED (exit 2)
+FROM python:3.12-slim
+
+# nmap from the distro repo (installed at build time — no host install needed).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends nmap \
+ && rm -rf /var/lib/apt/lists/*
+
+# run_scan only needs defusedxml (adapters); psycopg/fastapi are NOT required
+# (db.py imports psycopg lazily/optionally; the runner never touches the DB).
+RUN pip install --no-cache-dir defusedxml
+
+WORKDIR /app
+
+# Non-root: a TCP-connect scan (-sT, used by the adapter) needs no privileges.
+RUN useradd --create-home --uid 10002 --shell /usr/sbin/nologin scanner
+COPY --chown=scanner:scanner . /app/orchestrator
+
+ENV PYTHONUNBUFFERED=1
+USER scanner
+WORKDIR /app/orchestrator
+
+# run_scan.py is the entrypoint; compose/`docker run` args (e.g. --target ...)
+# are appended. It refuses any out-of-scope target before touching nmap.
+ENTRYPOINT ["python", "run_scan.py"]
+CMD ["--help"]

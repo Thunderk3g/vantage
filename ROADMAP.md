@@ -35,8 +35,12 @@ Keep it honest: check a box only when the exit criteria are met and verified.
       run the real CLI **safely** (argv/no-shell, `-sT` unprivileged, safe-NSE only,
       target-injection guard, bounded timeout, graceful when nmap absent) +
       `orchestrator/run_scan.py` — a **scope-gated, CLI/worker-only** runner
-      (loopback + HOD inventory only; out-of-scope targets refused, exit 2; no web
-      endpoint). Other engines (Burp/Nessus/ZAP/…) still stubbed.
+      (loopback + `host.docker.internal` + HOD inventory only; out-of-scope targets
+      refused, exit 2; no web endpoint). **Dockerized:** `Dockerfile.scanner` +
+      the compose `scanner` service (profile `scan`) bundle nmap so a real scan
+      runs with **no host install** (`docker compose run --rm scanner --target …`;
+      verified: nmap 7.95 scans 127.0.0.1 in-container, 8.8.8.8 refused). Other
+      engines (Burp/Nessus/ZAP/…) still stubbed.
 - [ ] Datastore layer (psycopg) behind the activity stubs
 - [~] RBAC / SSO (AD/LDAP + OIDC) — **code complete & tested** (`api/auth.py`:
       OIDC Auth-Code+PKCE, JWKS id_token validation, AD-group→role map, LDAP

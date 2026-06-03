@@ -185,6 +185,26 @@ host so the browser reaches each directly (CORS is scoped to the console
 origin). The API serves seed data today; `db` provisions and validates the
 schema for the next phase.
 
+### Run a real scan — no host install needed
+
+The `scanner` service bundles **nmap** + the scope-gated runner, so you can run a
+real (authorized) scan without installing nmap on your machine. It's behind the
+`scan` profile, so `docker compose up` never starts it:
+
+```bash
+docker compose build scanner
+docker compose run --rm scanner --target 127.0.0.1                  # scan the container
+docker compose run --rm scanner --target host.docker.internal       # scan your own host
+docker compose run --rm scanner --target host.docker.internal --json /out/scan.json
+docker compose run --rm scanner --target 8.8.8.8                    # REFUSED (exit 2)
+```
+
+It only scans **loopback / `host.docker.internal` / the HOD-approved inventory**;
+any other target is refused fail-closed *before* nmap is touched. The scan is
+non-intrusive (TCP-connect + version + safe NSE only), argv-based (no shell), and
+runs **non-root**. `--json /out/<name>.json` writes the triaged register to
+`./scan-output/` on the host.
+
 ### Manual (dev)
 
 ```bash

@@ -81,5 +81,23 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # On-demand live scanner (nmap + the scope-gated run_scan CLI). NOT started by
+  # `docker compose up` — it's behind the "scan" profile. Run it explicitly:
+  #   docker compose run --rm scanner --target 127.0.0.1
+  #   docker compose run --rm scanner --target host.docker.internal --json /out/scan.json
+  #   docker compose run --rm scanner --target 8.8.8.8     # REFUSED, exit 2
+  scanner:
+    profiles: ["scan"]
+    build:
+      context: ./orchestrator
+      dockerfile: Dockerfile.scanner
+    # Lets `--target host.docker.internal` resolve to your machine on Linux too
+    # (Docker Desktop adds this automatically).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # `--json /out/<name>.json` lands the register here on the host.
+    volumes:
+      - ./scan-output:/out
+
 volumes:
   vantage-db:
