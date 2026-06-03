@@ -201,6 +201,24 @@ plug-in). **Notifies humans only — never acts on a target.** Audited
 ```
 Dedupe: a `(finding, stage)` already dispatched in the run is skipped. 403 if not `admin`.
 
+### `GET /api/schedule` — scan schedule (cadence + blackout calendar; any authenticated user)
+Cadence-driven plan across the approved inventory — web pentest 2×/yr · internal
+infra VA 2×/yr · CIS config review 1×/yr — with freeze windows honoured (a due
+date inside a blackout shifts to the day after it closes). **Planning view only;
+launches nothing.**
+```json
+{ "today": "2026-06-02",
+  "blackouts": [ {"start":"2026-03-25","end":"2026-04-10","reason":"FY-end change freeze"}, … ],
+  "entries": [ {"assetId","asset","pipeline","scanType","cadence","cadenceDays","lastRun",
+    "nextDue","overdue":bool,"dueSoon":bool,"shiftedByBlackout":bool,"blackoutReason":str|null,
+    "daysUntil":int}, … ],
+  "counts": { "total": N, "overdue": M, "dueSoon": K } }
+```
+`scanType` ∈ `web-pentest|infra-va|cis-review`. `lastRun` is derived from the most
+recent *completed* scan of that asset (else a baseline scan is due now). Actually
+running the plan on a timer is the Temporal/cron layer; any launched scan still
+passes the human/scope gate.
+
 ### `POST /api/reports` — generate a report
 Body: `{ "template": "audit|exec|asset|sla", "scope": "all|<assetId>", "formats": ["xlsx","docx","pdf"], "openPassword"?: "<str>", "ownerPassword"?: "<str>", "by": "<name>" }`
 - `by` required (human actor) → 422.

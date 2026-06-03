@@ -27,7 +27,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from . import seed
 from .auth import Role, User, get_current_user, require_role, session_actor, router as auth_router
 from orchestrator.reporting.export import build_xlsx, build_docx, build_pdf
-from orchestrator import escalation, notifications
+from orchestrator import escalation, notifications, scheduler
 
 app = FastAPI(title="Vantage API", version="0", description="Read-only vulnerability-scanner console API.")
 
@@ -452,6 +452,42 @@ def get_audit(limit: Optional[int] = Query(None, ge=1), user: User = Depends(get
 # notification service (log + in-memory sinks; a webhook/ITSM sink is the
 # production plug-in). This NEVER acts on a target — it only notifies humans.
 # ---------------------------------------------------------------------------
+
+
+def _derive_last_runs() -> dict:
+    """Build {assetId: <ISO date>} anchors from COMPLETED seed scans.
+
+    Maps each completed scan's `target` (a name) to its asset id, using the
+    scan's `started` date (first 10 chars). Skips entries whose started date is
+    "—"/unparseable. If an asset has multiple completed scans, keeps the most
+    recent. Assets with no completed scan are simply absent (the engine then
+    treats them as due now). This anchors the planning view in realistic
+    last-run dates without launching anything.
+    """
+    name_to_id = {a["name"]: a["id"] for a in seed.assets()}
+    last_runs: dict[str, str] = {}
+    for s in seed.scans():
+        if s.get("status") != "completed":
+            continue
+        asset_id = name_to_id.get(s.get("target"))
+        if asset_id is None:
+            continue
+        d = scheduler._to_date(s.get("started"))
+        if d is None:
+            continue
+        iso = d.isoformat()
+        prev = last_runs.get(asset_id)
+        if prev is None or iso > prev:
+            last_runs[asset_id] = iso
+    return last_runs
+
+
+@app.get("/api/schedule")
+def get_schedule(user: User = Depends(get_current_user)):
+    """Cadence + blackout-aware scan schedule across the approved inventory.
+    Read-only planning view — does NOT launch scans (that stays human/scope
+    gated)."""
+    return scheduler.build_schedule(seed.assets(), seed.TODAY, last_runs=_derive_last_runs())
 
 
 @app.get("/api/escalations")

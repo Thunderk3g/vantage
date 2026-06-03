@@ -140,8 +140,11 @@ Keep it honest: check a box only when the exit criteria are met and verified.
       (Notifier + log/in-memory/webhook sinks, dedupe ledger, Jira-shaped ITSM
       payload) wired to `POST /api/escalations/run` (admin sweep). **Remaining:**
       point the webhook sink at a real Jira/ServiceNow endpoint (config).
-- [ ] Scheduler with cadence + blackout calendars
-      (internal 2×/yr · public 2×/yr · CIS 1×/yr) — would drive the sweep on a timer
+- [x] Scheduler with cadence + blackout calendars
+      (web 2×/yr · internal VA 2×/yr · CIS 1×/yr) — `scheduler.py` (pure: cadence
+      per asset, blackout-window shifting, overdue/due-soon) + `GET /api/schedule`
+      + a console "Schedule" screen. **Remaining:** drive it on a timer (Temporal/
+      cron); any launched scan still passes the human/scope gate.
 
 ## Phase 5 — OSS variant & hardening  `target: 2–3 wks`
 **Exit:** license-free pipeline at parity; audit-ready.

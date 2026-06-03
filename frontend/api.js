@@ -194,6 +194,16 @@
       }
     },
 
+    // ---- Schedule ------------------------------------------------------------
+    // GET /api/schedule → the cadence + blackout-aware scan plan
+    // { today, blackouts, entries, counts }. On any error, fall back to a
+    // client-computed object of the SAME shape (from window.ASSETS) so the
+    // Schedule screen still renders offline.
+    async schedule() {
+      try { return await getJSON("/api/schedule"); }
+      catch (err) { warnOnce("GET /api/schedule", err); return computeScheduleFromMock(); }
+    },
+
     // ---- Escalations ---------------------------------------------------------
     // GET /api/escalations → the server-side rollup { today, ladder, stageCounts,
     // findings, due, counts }. On any error, fall back to a client-computed object
@@ -335,6 +345,42 @@
       findings: active,
       due: due,
       counts: { active: active.length, overdue: overdueCount, due: due.length },
+    };
+  }
+
+  // Build the schedule plan from the mock, matching /api/schedule shape.
+  // web assets → one web-pentest (2x/yr); infra → infra-va (2x/yr) + cis-review
+  // (1x/yr). Offline placeholder: lastRun null, nextDue today, dueSoon today.
+  function computeScheduleFromMock() {
+    const TODAY = "2026-06-02";
+    const blackouts = [
+      { start: "2026-03-25", end: "2026-04-10", reason: "FY-end change freeze" },
+      { start: "2026-12-20", end: "2027-01-02", reason: "Year-end peak freeze" },
+    ];
+    const entries = [];
+    (window.ASSETS || []).forEach(function (a) {
+      function entry(scanType, cadence, cadenceDays) {
+        entries.push({
+          assetId: a.id, asset: a.name, pipeline: a.type, scanType: scanType,
+          cadence: cadence, cadenceDays: cadenceDays, lastRun: null, nextDue: TODAY,
+          overdue: false, dueSoon: true, shiftedByBlackout: false,
+          blackoutReason: null, daysUntil: 0,
+        });
+      }
+      if (a.type === "web") {
+        entry("web-pentest", "2x/yr", 182);
+      } else {
+        entry("infra-va", "2x/yr", 182);
+        entry("cis-review", "1x/yr", 365);
+      }
+    });
+    const overdue = entries.filter(function (e) { return e.overdue; }).length;
+    const dueSoon = entries.filter(function (e) { return e.dueSoon; }).length;
+    return {
+      today: TODAY,
+      blackouts: blackouts,
+      entries: entries,
+      counts: { total: entries.length, overdue: overdue, dueSoon: dueSoon },
     };
   }
 
