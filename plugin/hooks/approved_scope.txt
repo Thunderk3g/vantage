@@ -1,0 +1,34 @@
+# Approved scan scope (HOD-approved inventory). One host / IP / CIDR / AST- id
+# per line. '#' starts a comment. This file is the offline fallback for the
+# Vantage scope-guard hook; the live inventory is GET {VANTAGE_API_BASE}/api/assets
+# and the two are UNIONed. Keep this mirrored with orchestrator/api/seed.py ASSETS.
+
+# --- hostnames (web + infra assets) ---
+portal.lifeco.internal
+api.agent.lifeco.internal
+api.claims.lifeco.internal
+pay.lifeco.internal
+uw.lifeco.internal
+sso.lifeco.internal
+api.reins.lifeco.internal
+hr.staging.lifeco.internal
+
+# --- IPs / CIDRs (infra assets) ---
+10.20.4.0/24
+10.20.8.12
+10.20.6.40
+10.10.0.1
+
+# --- asset ids (the AST- inventory ids; request_scan targets these) ---
+AST-PORTAL
+AST-AGENT
+AST-CLAIMS
+AST-PAY
+AST-UW
+AST-PAS
+AST-DWH
+AST-IDP
+AST-DMS
+AST-REINS
+AST-VPN
+AST-HR

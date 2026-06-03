@@ -8,6 +8,7 @@
   "homepage": "https://github.com/Thunderk3g/vantage",
   "license": "MIT",
   "keywords": ["security", "vulnerability-management", "appsec", "triage", "mcp"],
+  "hooks": "./hooks/hooks.json",
   "mcpServers": {
     "vantage": {
       "command": "python",

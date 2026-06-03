@@ -16,6 +16,19 @@ and generate dual-password reports.
 > - `confirm_false_positive` / exception approval are the only paths to
 >   `confirmed_fp` / `risk_accepted` — enforced by the API.
 
+## Plugin surfaces
+
+| Surface | What it adds |
+|---------|-------------|
+| **MCP server** (`mcp/`) | 16 tools wrapping the API (below). |
+| **Scope-guard hook** (`hooks/`) | A `PreToolUse` hook that **blocks** any `Bash` scanner/recon command (nmap, nikto, nuclei, sqlmap, …) or `request_scan` aimed at a host **not** in the approved inventory — fail-closed when scope can't be confirmed; `WebFetch` to an external host becomes "ask". Makes "never touch an unauthorized target" something the agent itself can't violate. |
+| **Slash commands** (`commands/`) | `/vantage-triage`, `/vantage-scope-check`, `/vantage-sla`, `/vantage-report`, `/vantage-scan-diff`. |
+| **Skill** (`skills/vuln-triage/`) | The governance playbook: CVSS→severity bands, IRDAI SLAs (Crit/High 30d · Med/Low 60d), the Day 0→18 escalation staircase, exception tiers (CISO/RMC/Board), and the FP / risk-acceptance state rules. |
+
+> The hook is defense-in-depth on top of the server scope gate. Its allowlist
+> is `hooks/approved_scope.txt` (seeded with the reference inventory) unioned with
+> a live `GET /api/assets`; edit the file or point at your real API to set scope.
+
 ## Tools
 
 | Read | Write (server-gated) |

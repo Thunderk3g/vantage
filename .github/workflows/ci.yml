@@ -184,6 +184,11 @@ jobs:
           pip install -r plugin/mcp/requirements.txt
           python -m py_compile plugin/mcp/vantage_server.py
           python plugin/mcp/test_server_smoke.py
+      - name: Validate hook config + run scope-guard hook test (stdlib only)
+        run: |
+          python -c "import json; json.load(open('plugin/hooks/hooks.json')); print('hooks.json valid')"
+          python -m py_compile plugin/hooks/scope_guard.py
+          python plugin/hooks/test_scope_guard.py
 
   # ------------------------------------------------------------------
   # Docs: the architecture generator must run and produce a valid docx.
