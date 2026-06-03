@@ -1,0 +1,291 @@
+\documentclass[11pt,a4paper]{article}
+
+% ---- packages (all standard TeX Live; compiles with pdflatex) ----
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=2.4cm]{geometry}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{titlesec}
+
+% colours must be defined BEFORE hyperref reads them in its options
+\definecolor{NavyBlue}{RGB}{32,64,128}
+\definecolor{Soft}{RGB}{245,247,250}
+
+\usepackage[colorlinks=true,linkcolor=NavyBlue!70!black,urlcolor=NavyBlue!70!black,citecolor=NavyBlue!70!black]{hyperref}
+
+% inline code that survives underscores etc.
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\boundary}[1]{\textcolor{NavyBlue!80!black}{\textbf{#1}}}
+
+\titleformat{\section}{\Large\bfseries\color{NavyBlue!75!black}}{\thesection}{0.6em}{}
+\titleformat{\subsection}{\large\bfseries\color{NavyBlue!60!black}}{\thesubsection}{0.6em}{}
+
+\setlist[itemize]{leftmargin=1.3em,itemsep=2pt,topsep=2pt}
+
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+
+\title{\vspace{-1.5cm}\textbf{Vantage --- Security Architecture \&\\ Control Reference}}
+\author{InfoSec / AppSec --- reference build\\\small Bajaj Life Insurance (IRDAI-regulated; ISO/IEC 27001:2022 context)}
+\date{\today}
+
+\begin{document}
+\maketitle
+\vspace{-0.8cm}
+
+\noindent\fbox{\parbox{\dimexpr\textwidth-2\fboxsep-2\fboxrule}{%
+\small \boundary{Hard product boundary.} Vantage \emph{scans and reports only}.
+It detects, triages, and reports vulnerabilities; it does \textbf{not} exploit,
+perform lateral movement, or auto-remediate. Every control in this document is
+read as defense-in-depth around that boundary.}}
+
+\section{Purpose and scope}
+This document is the control reference for \emph{Vantage}, an AI-augmented
+vulnerability console for a regulated life insurer. It enumerates each security
+control: its \textbf{mechanism}, its \textbf{location} in the codebase, and how
+it is \textbf{verified} (unit test / CI gate). It is intended as ISO/IEC
+27001:2022 control evidence and as an engineering reference. The controls span
+four enforcement surfaces --- the \textbf{database}, the \textbf{API}, the
+\textbf{console UI}, and the \textbf{agent} (the Claude Code plugin).
+
+\section{The hard boundary: scan-and-report only}
+The boundary is enforced \emph{structurally}, not merely documented:
+\begin{itemize}
+  \item The pipeline \code{Phase} enum (\code{shared.py}) has \textbf{no}
+        \code{exploit}/\code{lateral}/\code{remediate} state; the terminal phase
+        is \code{report}.
+  \item No scanner adapter exposes an offensive verb; the only methods are
+        \code{preflight}, \code{launch}, \code{wait}, \code{fetch\_raw},
+        \code{parse}. The live \code{launch}/\code{wait}/\code{fetch\_raw} are
+        deliberately \code{NotImplementedError} in the reference build.
+  \item This is asserted by an \textbf{executable invariant}
+        (\code{orchestrator/test\_scope\_invariants.py}) and a CI grep guard ---
+        a change that introduced an exploitation phase or verb fails the build.
+\end{itemize}
+
+\section{Control layers}
+
+\subsection{Authorization to scan --- the scope gate}
+A target is scanned only if it is in the HOD-approved inventory. The gate is
+\textbf{fail-closed} and enforced at four independent points:
+\begin{itemize}
+  \item \boundary{Server} (\code{api/main.py}, \code{POST /api/scans}):
+        \code{seed.asset\_by\_id(assetId)}; an unknown / non-approved asset is
+        refused with HTTP \textbf{403 \code{out\_of\_scope}} \emph{before} any
+        other validation, and the denial is audited
+        (\code{SCAN\_DENIED\_OUT\_OF\_SCOPE}).
+  \item \boundary{Orchestrator} (\code{activities.scope\_gate\_authorize}):
+        resolves the target query against \code{assets WHERE
+        approved\_in\_inventory}, mints an Ed25519-signed, time-boxed
+        authorization token, and re-verifies it at the moment of use
+        (\code{\_enforce\_scope}) as a TOCTOU defense; adapters additionally call
+        \code{assert\_targets\_in\_scope}.
+  \item \boundary{Console} (\code{StartScan.jsx}): the asset picker offers only
+        approved assets, so an out-of-scope target cannot be selected.
+  \item \boundary{Agent} (\code{plugin/hooks/scope\_guard.py}): a
+        \code{PreToolUse} hook blocks scanner/recon shell commands or
+        \code{request\_scan} aimed at a host not in the approved inventory.
+\end{itemize}
+
+\subsection{Authentication --- OIDC + signed session}
+Implemented in \code{api/auth.py} against Active Directory / Entra via OIDC.
+\begin{itemize}
+  \item \textbf{Flow:} Authorization Code + \textbf{PKCE} (S256); \code{state} and
+        \code{nonce} are carried in a signed, \code{httpOnly} transaction cookie,
+        salt-namespaced from the session cookie so neither can be replayed as the
+        other.
+  \item \textbf{\code{id\_token} validation:} \code{JsonWebToken(["RS256"])} ---
+        the algorithm allow-list is \textbf{pinned}, which structurally blocks
+        the \code{alg:none} downgrade and HS/RS key-confusion attacks.
+        \code{iss} and \code{aud} are essential and value-pinned, \code{exp} is
+        essential (60\,s leeway), and \code{nonce} is matched. Keys are taken
+        only from the IdP \textbf{JWKS} (via discovery).
+  \item \textbf{Session:} a signed (\code{itsdangerous}) \code{httpOnly},
+        \code{SameSite=Lax} cookie over \{\code{sub,name,email,roles,groups,exp}\};
+        \emph{both} the cookie \code{max\_age} and the embedded \code{exp} are
+        enforced; \code{Secure} in production.
+  \item \textbf{Fail-closed:} with \code{AUTH\_REQUIRED=true} and no
+        \code{SESSION\_SECRET}, signing \emph{raises} rather than using the known
+        dev key --- so sessions are never forgeable in production.
+  \item \textbf{Reference-build switch:} \code{AUTH\_REQUIRED} (default off) makes
+        an unauthenticated caller a synthetic \code{dev} admin so the offline
+        console and CI keep working; crucially, the \emph{actor is still derived
+        server-side} in both modes.
+\end{itemize}
+
+\subsection{Authorization --- RBAC}
+\begin{itemize}
+  \item \code{require\_role(*roles)} dependency; \code{admin} is a wildcard;
+        \textbf{401 (unauthenticated) always beats 403 (forbidden)} because the
+        role check depends on \code{get\_current\_user}.
+  \item Matrix: reads require any authenticated user; \code{analyst} for
+        status / scan / exception / false-positive / retest; the \emph{exception's
+        tier role} (CISO / RMC / Board) for approve--reject; \code{admin} for the
+        escalation sweep.
+  \item \textbf{Actor is server-derived} (\code{session\_actor(user)}) --- never
+        read from the request body; this closes the spoofable-actor gap.
+  \item \textbf{Report download is owner-scoped:}
+        \code{entry["owner"] == user.sub} or \code{admin}, else 403.
+  \item \textbf{State invariant:} \code{risk\_accepted} is reachable \emph{only}
+        via an approved exception; \code{confirmed\_fp} only via the
+        false-positive flow --- the generic status path cannot set either.
+\end{itemize}
+
+\subsection{Injection and input-validation defenses}
+\begin{longtable}{L{3.1cm} L{11.2cm}}
+\toprule
+\textbf{Class} & \textbf{Defense} \\
+\midrule
+\endhead
+XXE & All XML (Nmap / Nessus / Nikto) parsed with \code{defusedxml} (external
+entities + billion-laughs blocked); the invariant test asserts no stdlib
+\code{xml.etree} import anywhere. \\
+\addlinespace
+SQL injection & All values are parameterized (\code{\%s}); the only \code{\{table\}}
+f-strings interpolate hardcoded internal literals, never request input. \\
+\addlinespace
+LDAP injection & The OIDC-claim email is shape-validated (rejects
+\code{, \textbackslash\ * ( )} and NUL) \emph{and} \code{escape\_filter\_chars}
+escaped (RFC 4515) before the \code{memberOf} filter; the search is skipped on
+metacharacters. \\
+\addlinespace
+Open redirect & \code{\_safe\_next} requires a single-slash relative path; rejects
+\code{//}, backslash, CR/LF/tab, and any non-empty \code{urlsplit().netloc}. \\
+\addlinespace
+Path traversal / SSRF & Report download maps \code{reportId}/\code{fmt} through an
+in-memory registry to a server-built path (never the raw param); the MCP/hook
+HTTP clients are pinned to a fixed \code{base\_url}, so adversarial paths stay
+on-host. \\
+\addlinespace
+Code execution & JSON via \code{json.load} only --- no \code{eval} / \code{pickle}
+/ \code{yaml.load}; the scope-guard hook \emph{inspects} shell strings, it never
+executes them. \\
+\bottomrule
+\end{longtable}
+
+\subsection{Cryptography and secrets}
+\begin{itemize}
+  \item \textbf{Report capability token:} \code{secrets.token\_urlsafe(24)}
+        ($\approx$192 bits, unguessable), TTL-bounded ($\approx$1\,h), owner-bound,
+        and not echoed into the download filename.
+  \item \textbf{Dual-password PDF:} \code{pikepdf} AES-256 (R6) --- an \emph{open}
+        password to view plus an \emph{owner} password that lifts the
+        copy/modify/print restriction.
+  \item \textbf{Signing keys:} Ed25519 for scope-authorization tokens (vault-held);
+        the session signing key comes from env/vault and fails closed when absent
+        in production.
+\end{itemize}
+
+\subsection{Audit integrity}
+The \code{audit\_log} table (\code{db/schema.sql}) is \textbf{append-only and
+hash-chained}: a \code{BEFORE INSERT} trigger computes \code{prev\_hash} /
+\code{row\_hash}, and \code{UPDATE} / \code{DELETE} are blocked by trigger. CI
+actively smoke-tests that an \code{UPDATE} is rejected. Every mutation and every
+scope denial is recorded with the \emph{server-derived} actor --- the trail is
+tamper-evident.
+
+\subsection{Agent-layer enforcement (the Claude Code plugin)}
+The \code{plugin/} package lets Claude drive the console while preserving the
+boundary on the server:
+\begin{itemize}
+  \item \textbf{MCP server} (\code{plugin/mcp/vantage\_server.py}): a thin
+        forwarder over the API; there is \emph{no} exploit/attack tool (the smoke
+        test asserts no offensive verb leaked), and \code{request\_scan} forwards
+        to the fail-closed server scope gate.
+  \item \textbf{Scope-guard hook} (\code{plugin/hooks/scope\_guard.py}): a
+        \code{PreToolUse} hook that parses (never executes) a Bash command,
+        detects scanner tools, extracts target hosts, and \textbf{denies}
+        (fail-closed) any scan against a host not in the allowlist
+        (\code{approved\_scope.txt} $\cup$ live \code{GET /api/assets}); external
+        \code{WebFetch} becomes ``ask''.
+\end{itemize}
+
+\section{Control-to-verification traceability}
+Every control is backed by a test that runs in CI.
+
+\begin{longtable}{L{4.6cm} L{6.0cm} L{3.5cm}}
+\toprule
+\textbf{Control} & \textbf{Verification} & \textbf{Result} \\
+\midrule
+\endhead
+Scope gate (fail-closed) & \code{test\_api\_auth\_integration.py},
+\code{test\_scan\_diff.py} & 403 out\_of\_scope \\
+\addlinespace
+No exploit phase/verb & \code{test\_scope\_invariants.py} + CI grep guard & green \\
+\addlinespace
+OIDC \code{id\_token} validation & \code{api/test\_auth.py} (mock JWKS) & alg-pinned, claims checked \\
+\addlinespace
+Session forgery / fail-closed & \code{api/test\_auth.py} & raises w/o secret \\
+\addlinespace
+RBAC matrix & \code{test\_fp\_exception\_workflow.py}, \code{test\_escalations\_api.py} & viewer 403 / role 200 \\
+\addlinespace
+Server-derived actor & \code{test\_api\_auth\_integration.py} & audit = session actor \\
+\addlinespace
+Report owner-scoping & \code{test\_api\_auth\_integration.py} & non-owner 403 \\
+\addlinespace
+LDAP injection guard & \code{api/test\_auth.py} & metachar email rejected \\
+\addlinespace
+Open-redirect guard & \code{api/test\_auth.py} & backslash bypass blocked \\
+\addlinespace
+XXE-safe parsing & adapter tests + \code{test\_scope\_invariants.py} & defusedxml only \\
+\addlinespace
+Audit append-only / hash-chain & schema smoke test (CI) & UPDATE rejected \\
+\addlinespace
+Dual-password PDF & \code{reporting/test\_reporting.py} & AES-256 R6 \\
+\addlinespace
+Scope-guard hook & \code{plugin/hooks/test\_scope\_guard.py} & 9/9 (incl. fail-closed) \\
+\addlinespace
+MCP boundary (no exploit tool) & \code{plugin/mcp/test\_server\_smoke.py} & no offensive verb \\
+\bottomrule
+\end{longtable}
+
+\section{Security review methodology and results}
+Changes are reviewed by an automated, three-phase security review:
+\begin{enumerate}
+  \item an identification pass traces untrusted input (request bodies/params,
+        OIDC claims, LDAP responses, scanner output, report parameters) to
+        sensitive sinks (SQL, file paths, the token/JWKS validation, HTML);
+  \item parallel false-positive filters re-examine each candidate;
+  \item findings below confidence 8/10 are dropped.
+\end{enumerate}
+The categories examined are input validation (SQLi, command injection, XXE, path
+traversal, SSRF), authentication/authorization, cryptography/secrets, code
+execution/deserialization, and data exposure. Noise classes (DoS, secrets-at-rest,
+rate-limiting, hardening-without-exploit, dependency CVEs) are excluded.
+
+\paragraph{Outcome.} Across reviews of the full server-side surface and the plugin
+code, the codebase is currently \textbf{clean} at the reporting bar. The only
+finding to date --- a low-severity open redirect via a backslash bypass in
+\code{\_safe\_next} --- was remediated (rejecting backslash/CR/LF and re-validating
+the parsed network location) and is covered by a regression test.
+
+\appendix
+\section{Build and run}
+\begin{itemize}
+  \item Stack: \code{docker compose up --build} --- console at
+        \href{http://localhost:8137}{localhost:8137}, API at \code{:8138},
+        Postgres at \code{:5432} (schema auto-applied).
+  \item Tests: each control's test is listed in \S5 and runs in GitHub Actions CI.
+\end{itemize}
+
+\section{Production configuration (env)}
+\begin{itemize}
+  \item \code{AUTH\_REQUIRED=true} --- enforce real OIDC (default off in the
+        reference build).
+  \item \code{OIDC\_ISSUER}, \code{OIDC\_CLIENT\_ID}, \code{OIDC\_CLIENT\_SECRET},
+        \code{OIDC\_REDIRECT\_URI} --- IdP configuration.
+  \item \code{SESSION\_SECRET} (required when auth is on), \code{SESSION\_COOKIE\_SECURE=true}.
+  \item \code{VANTAGE\_GROUP\_ROLE\_MAP} --- AD-group to role mapping;
+        \code{LDAP\_*} for \code{memberOf} resolution.
+  \item \code{DATABASE\_URL} --- Postgres for the persistence overlay and the
+        hash-chained audit log.
+\end{itemize}
+
+\vfill
+\noindent\rule{\textwidth}{0.4pt}\\
+\small Generated as control evidence for the Vantage reference build. Source of
+truth: the repository tests and \code{docs/auth-contract.md} / \code{docs/api-contract.md}.
+\end{document}
